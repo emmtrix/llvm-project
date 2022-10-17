@@ -76,7 +76,7 @@ struct PrintingPolicy {
         PrintCanonicalTypes(false), PrintInjectedClassNameWithArguments(true),
         UsePreferredNames(true), AlwaysIncludeTypeForTemplateArgument(false),
         CleanUglifiedParameters(false), EntireContentsOfLargeArray(true),
-        UseEnumerators(true) {}
+        UseEnumerators(true), Typeof(LO.GNUMode || LO.C2x) {}
 
   /// Adjust this printing policy for cases where it's known that we're
   /// printing C++ code (for instance, if AST dumping reaches a C++-only
@@ -298,6 +298,9 @@ struct PrintingPolicy {
   /// Whether to print enumerator non-type template parameters with a matching
   /// enumerator name or via cast of an integer.
   unsigned UseEnumerators : 1;
+
+  /// Whether we can use 'typeof'/'typeof_unqual' rather than '__typeof'/'__typeof_unqual'.
+  unsigned Typeof : 1;
 
   /// Callbacks to use to allow the behavior of printing to be customized.
   const PrintingCallbacks *Callbacks = nullptr;

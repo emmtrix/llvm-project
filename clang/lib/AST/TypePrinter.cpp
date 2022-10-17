@@ -1110,8 +1110,11 @@ void TypePrinter::printTypedefAfter(const TypedefType *T, raw_ostream &OS) {}
 
 void TypePrinter::printTypeOfExprBefore(const TypeOfExprType *T,
                                         raw_ostream &OS) {
-  OS << (T->getKind() == TypeOfKind::Unqualified ? "typeof_unqual "
-                                                 : "typeof ");
+  if (T->getKind() == TypeOfKind::Unqualified) {
+    OS << (Policy.Typeof ? "typeof_unqual " : "__typeof_unqual ");
+  } else {
+    OS << (Policy.Typeof ? "typeof " : "__typeof ");
+  }
   if (T->getUnderlyingExpr())
     T->getUnderlyingExpr()->printPretty(OS, nullptr, Policy);
   spaceBeforePlaceHolder(OS);
@@ -1121,8 +1124,11 @@ void TypePrinter::printTypeOfExprAfter(const TypeOfExprType *T,
                                        raw_ostream &OS) {}
 
 void TypePrinter::printTypeOfBefore(const TypeOfType *T, raw_ostream &OS) {
-  OS << (T->getKind() == TypeOfKind::Unqualified ? "typeof_unqual("
-                                                 : "typeof(");
+  if (T->getKind() == TypeOfKind::Unqualified) {
+    OS << (Policy.Typeof ? "typeof_unqual(" : "__typeof_unqual(");
+  } else {
+    OS << (Policy.Typeof ? "typeof(" : "__typeof(");
+  }
   print(T->getUnmodifiedType(), OS, StringRef());
   OS << ')';
   spaceBeforePlaceHolder(OS);
