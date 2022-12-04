@@ -288,6 +288,7 @@ set(files
   __format/buffer.h
   __format/concepts.h
   __format/enable_insertable.h
+  __format/escaped_output_table.h
   __format/extended_grapheme_cluster_table.h
   __format/format_arg.h
   __format/format_arg_store.h
@@ -341,8 +342,10 @@ set(files
   __fwd/array.h
   __fwd/get.h
   __fwd/hash.h
+  __fwd/memory_resource.h
   __fwd/pair.h
   __fwd/span.h
+  __fwd/string.h
   __fwd/string_view.h
   __fwd/tuple.h
   __hash_table
@@ -393,6 +396,7 @@ set(files
   __memory/allocation_guard.h
   __memory/allocator.h
   __memory/allocator_arg_t.h
+  __memory/allocator_destructor.h
   __memory/allocator_traits.h
   __memory/assume_aligned.h
   __memory/auto_ptr.h
@@ -481,6 +485,7 @@ set(files
   __ranges/dangling.h
   __ranges/data.h
   __ranges/drop_view.h
+  __ranges/drop_while_view.h
   __ranges/empty.h
   __ranges/empty_view.h
   __ranges/enable_borrowed_range.h
@@ -774,6 +779,7 @@ set(files
   istream
   iterator
   latch
+  libcxx.imp
   limits
   limits.h
   list
@@ -833,7 +839,7 @@ set(files
   wctype.h
   )
 
-foreach(feature LIBCXX_ENABLE_FILESYSTEM LIBCXX_ENABLE_LOCALIZATION LIBCXX_ENABLE_THREADS LIBCXX_ENABLE_WIDE_CHARACTERS)
+foreach(feature LIBCXX_ENABLE_FILESYSTEM LIBCXX_ENABLE_LOCALIZATION LIBCXX_ENABLE_FSTREAM LIBCXX_ENABLE_THREADS LIBCXX_ENABLE_WIDE_CHARACTERS)
   if (NOT ${${feature}})
     set(requires_${feature} "requires LIBCXX_CONFIGURED_WITHOUT_SUPPORT_FOR_THIS_HEADER")
   endif()

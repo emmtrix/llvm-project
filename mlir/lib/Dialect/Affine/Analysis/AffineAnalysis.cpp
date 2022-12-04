@@ -67,7 +67,7 @@ static Value getSupportedReduction(AffineForOp forOp, unsigned pos,
           .Default([](Operation *) -> Optional<arith::AtomicRMWKind> {
             // TODO: AtomicRMW supports other kinds of reductions this is
             // currently not detecting, add those when the need arises.
-            return llvm::None;
+            return std::nullopt;
           });
   if (!maybeKind)
     return nullptr;
@@ -150,7 +150,7 @@ bool mlir::isLoopMemoryParallel(AffineForOp forOp) {
         loadAndStoreOps.push_back(op);
     } else if (!isa<AffineForOp, AffineYieldOp, AffineIfOp>(op) &&
                !hasSingleEffect<MemoryEffects::Allocate>(op) &&
-               !MemoryEffectOpInterface::hasNoEffect(op)) {
+               !isMemoryEffectFree(op)) {
       // Alloc-like ops inside `forOp` are fine (they don't impact parallelism)
       // as long as they don't escape the loop (which has been checked above).
       return WalkResult::interrupt();

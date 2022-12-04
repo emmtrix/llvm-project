@@ -37,12 +37,12 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/RWMutex.h"
 #include "llvm/Support/raw_ostream.h"
 #include <functional>
 #include <list>
 #include <map>
 #include <set>
-#include <shared_mutex>
 #include <string>
 #include <system_error>
 #include <type_traits>
@@ -190,7 +190,7 @@ class BinaryContext {
   std::map<uint64_t, BinaryFunction> BinaryFunctions;
 
   /// A mutex that is used to control parallel accesses to BinaryFunctions
-  mutable std::shared_timed_mutex BinaryFunctionsMutex;
+  mutable llvm::sys::RWMutex BinaryFunctionsMutex;
 
   /// Functions injected by BOLT
   std::vector<BinaryFunction *> InjectedBinaryFunctions;
@@ -323,7 +323,7 @@ public:
     if (FileBuildID)
       return StringRef(*FileBuildID);
 
-    return NoneType();
+    return std::nullopt;
   }
   void setFileBuildID(StringRef ID) { FileBuildID = std::string(ID); }
 
@@ -420,7 +420,7 @@ public:
   std::unordered_map<const MCSymbol *, BinaryFunction *> SymbolToFunctionMap;
 
   /// A mutex that is used to control parallel accesses to SymbolToFunctionMap
-  mutable std::shared_timed_mutex SymbolToFunctionMapMutex;
+  mutable llvm::sys::RWMutex SymbolToFunctionMapMutex;
 
   /// Look up the symbol entry that contains the given \p Address (based on
   /// the start address and size for each symbol).  Returns a pointer to
@@ -556,9 +556,9 @@ public:
   std::unique_ptr<MCContext> Ctx;
 
   /// A mutex that is used to control parallel accesses to Ctx
-  mutable std::shared_timed_mutex CtxMutex;
-  std::unique_lock<std::shared_timed_mutex> scopeLock() const {
-    return std::unique_lock<std::shared_timed_mutex>(CtxMutex);
+  mutable llvm::sys::RWMutex CtxMutex;
+  std::unique_lock<llvm::sys::RWMutex> scopeLock() const {
+    return std::unique_lock<llvm::sys::RWMutex>(CtxMutex);
   }
 
   std::unique_ptr<DWARFContext> DwCtx;
@@ -1236,10 +1236,10 @@ public:
     return Size;
   }
 
-  /// Verify that assembling instruction \p Inst results in the same sequence of
-  /// bytes as \p Encoding.
-  bool validateEncoding(const MCInst &Instruction,
-                        ArrayRef<uint8_t> Encoding) const;
+  /// Validate that disassembling the \p Sequence of bytes into an instruction
+  /// and assembling the instruction again, results in a byte sequence identical
+  /// to the original one.
+  bool validateInstructionEncoding(ArrayRef<uint8_t> Sequence) const;
 
   /// Return a function execution count threshold for determining whether
   /// the function is 'hot'. Consider it hot if count is above the average exec

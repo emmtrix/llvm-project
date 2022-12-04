@@ -3,6 +3,18 @@ add_libc_testsuite(libc_string_unittests)
 add_subdirectory(memory_utils)
 
 add_libc_unittest(
+  bcopy_test
+  SUITE
+    libc_string_unittests
+  SRCS
+    bcopy_test.cpp
+  DEPENDS
+    libc.src.string.bcopy
+  LINK_LIBRARIES
+    LibcMemoryHelpers
+)
+
+add_libc_unittest(
   memccpy_test
   SUITE
     libc_string_unittests
@@ -90,6 +102,16 @@ add_libc_unittest(
     strcmp_test.cpp
   DEPENDS
     libc.src.string.strcmp
+)
+
+add_libc_unittest(
+  strcoll_test
+  SUITE
+    libc_string_unittests
+  SRCS
+    strcoll_test.cpp
+  DEPENDS
+    libc.src.string.strcoll
 )
 
 add_libc_unittest(

@@ -115,8 +115,8 @@ set(LIBUNWIND_SHARED_OUTPUT_NAME "unwind" CACHE STRING "Output name for the shar
 set(LIBUNWIND_STATIC_OUTPUT_NAME "unwind" CACHE STRING "Output name for the static libunwind runtime library.")
 
 if(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR AND NOT APPLE)
-  set(LIBUNWIND_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}/${LLVM_DEFAULT_TARGET_TRIPLE})
-  set(LIBUNWIND_INSTALL_LIBRARY_DIR lib${LLVM_LIBDIR_SUFFIX}/${LLVM_DEFAULT_TARGET_TRIPLE} CACHE PATH
+  set(LIBUNWIND_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}/${LLVM_TARGET_TRIPLE})
+  set(LIBUNWIND_INSTALL_LIBRARY_DIR lib${LLVM_LIBDIR_SUFFIX}/${LLVM_TARGET_TRIPLE} CACHE PATH
       "Path where built libunwind libraries should be installed.")
   if(LIBCXX_LIBDIR_SUBDIR)
     string(APPEND LIBUNWIND_LIBRARY_DIR /${LIBUNWIND_LIBDIR_SUBDIR})
@@ -160,10 +160,10 @@ add_compile_flags_if_supported(-Werror=return-type)
 if (LIBUNWIND_ENABLE_CET)
   add_compile_flags_if_supported(-fcf-protection=full)
   add_compile_flags_if_supported(-mshstk)
-  if (NOT LIBUNWIND_SUPPORTS_FCF_PROTECTION_EQ_FULL_FLAG)
+  if (NOT CXX_SUPPORTS_FCF_PROTECTION_EQ_FULL_FLAG)
     message(SEND_ERROR "Compiler doesn't support CET -fcf-protection option!")
   endif()
-  if (NOT LIBUNWIND_SUPPORTS_MSHSTK_FLAG)
+  if (NOT CXX_SUPPORTS_MSHSTK_FLAG)
     message(SEND_ERROR "Compiler doesn't support CET -mshstk option!")
   endif()
 endif()

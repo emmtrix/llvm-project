@@ -36,6 +36,7 @@
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
+#include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -768,12 +769,16 @@ void CXXRecordDecl::addedMember(Decl *D) {
         // Note that we have a user-declared constructor.
         data().UserDeclaredConstructor = true;
 
-        // C++ [class]p4:
-        //   A POD-struct is an aggregate class [...]
-        // Since the POD bit is meant to be C++03 POD-ness, clear it even if
-        // the type is technically an aggregate in C++0x since it wouldn't be
-        // in 03.
-        data().PlainOldData = false;
+        const TargetInfo &TI = getASTContext().getTargetInfo();
+        if ((!Constructor->isDeleted() && !Constructor->isDefaulted()) ||
+            !TI.areDefaultedSMFStillPOD(getLangOpts())) {
+          // C++ [class]p4:
+          //   A POD-struct is an aggregate class [...]
+          // Since the POD bit is meant to be C++03 POD-ness, clear it even if
+          // the type is technically an aggregate in C++0x since it wouldn't be
+          // in 03.
+          data().PlainOldData = false;
+        }
       }
 
       if (Constructor->isDefaultConstructor()) {
@@ -881,18 +886,24 @@ void CXXRecordDecl::addedMember(Decl *D) {
       if (!Method->isImplicit()) {
         data().UserDeclaredSpecialMembers |= SMKind;
 
-        // C++03 [class]p4:
-        //   A POD-struct is an aggregate class that has [...] no user-defined
-        //   copy assignment operator and no user-defined destructor.
-        //
-        // Since the POD bit is meant to be C++03 POD-ness, and in C++03,
-        // aggregates could not have any constructors, clear it even for an
-        // explicitly defaulted or deleted constructor.
-        // type is technically an aggregate in C++0x since it wouldn't be in 03.
-        //
-        // Also, a user-declared move assignment operator makes a class non-POD.
-        // This is an extension in C++03.
-        data().PlainOldData = false;
+        const TargetInfo &TI = getASTContext().getTargetInfo();
+        if ((!Method->isDeleted() && !Method->isDefaulted() &&
+             SMKind != SMF_MoveAssignment) ||
+            !TI.areDefaultedSMFStillPOD(getLangOpts())) {
+          // C++03 [class]p4:
+          //   A POD-struct is an aggregate class that has [...] no user-defined
+          //   copy assignment operator and no user-defined destructor.
+          //
+          // Since the POD bit is meant to be C++03 POD-ness, and in C++03,
+          // aggregates could not have any constructors, clear it even for an
+          // explicitly defaulted or deleted constructor.
+          // type is technically an aggregate in C++0x since it wouldn't be in
+          // 03.
+          //
+          // Also, a user-declared move assignment operator makes a class
+          // non-POD. This is an extension in C++03.
+          data().PlainOldData = false;
+        }
       }
       // When instantiating a class, we delay updating the destructor and
       // triviality properties of the class until selecting a destructor and
@@ -2869,41 +2880,47 @@ NamespaceDecl *UsingDirectiveDecl::getNominatedNamespace() {
 
 NamespaceDecl::NamespaceDecl(ASTContext &C, DeclContext *DC, bool Inline,
                              SourceLocation StartLoc, SourceLocation IdLoc,
-                             IdentifierInfo *Id, NamespaceDecl *PrevDecl)
+                             IdentifierInfo *Id, NamespaceDecl *PrevDecl,
+                             bool Nested)
     : NamedDecl(Namespace, DC, IdLoc, Id), DeclContext(Namespace),
-      redeclarable_base(C), LocStart(StartLoc),
-      AnonOrFirstNamespaceAndInline(nullptr, Inline) {
+      redeclarable_base(C), LocStart(StartLoc) {
+  unsigned Flags = 0;
+  if (Inline)
+    Flags |= F_Inline;
+  if (Nested)
+    Flags |= F_Nested;
+  AnonOrFirstNamespaceAndFlags = {nullptr, Flags};
   setPreviousDecl(PrevDecl);
 
   if (PrevDecl)
-    AnonOrFirstNamespaceAndInline.setPointer(PrevDecl->getOriginalNamespace());
+    AnonOrFirstNamespaceAndFlags.setPointer(PrevDecl->getOriginalNamespace());
 }
 
 NamespaceDecl *NamespaceDecl::Create(ASTContext &C, DeclContext *DC,
                                      bool Inline, SourceLocation StartLoc,
                                      SourceLocation IdLoc, IdentifierInfo *Id,
-                                     NamespaceDecl *PrevDecl) {
-  return new (C, DC) NamespaceDecl(C, DC, Inline, StartLoc, IdLoc, Id,
-                                   PrevDecl);
+                                     NamespaceDecl *PrevDecl, bool Nested) {
+  return new (C, DC)
+      NamespaceDecl(C, DC, Inline, StartLoc, IdLoc, Id, PrevDecl, Nested);
 }
 
 NamespaceDecl *NamespaceDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) NamespaceDecl(C, nullptr, false, SourceLocation(),
-                                   SourceLocation(), nullptr, nullptr);
+                                   SourceLocation(), nullptr, nullptr, false);
 }
 
 NamespaceDecl *NamespaceDecl::getOriginalNamespace() {
   if (isFirstDecl())
     return this;
 
-  return AnonOrFirstNamespaceAndInline.getPointer();
+  return AnonOrFirstNamespaceAndFlags.getPointer();
 }
 
 const NamespaceDecl *NamespaceDecl::getOriginalNamespace() const {
   if (isFirstDecl())
     return this;
 
-  return AnonOrFirstNamespaceAndInline.getPointer();
+  return AnonOrFirstNamespaceAndFlags.getPointer();
 }
 
 bool NamespaceDecl::isOriginalNamespace() const { return isFirstDecl(); }
@@ -3122,7 +3139,8 @@ UsingPackDecl *UsingPackDecl::Create(ASTContext &C, DeclContext *DC,
 UsingPackDecl *UsingPackDecl::CreateDeserialized(ASTContext &C, unsigned ID,
                                                  unsigned NumExpansions) {
   size_t Extra = additionalSizeToAlloc<NamedDecl *>(NumExpansions);
-  auto *Result = new (C, ID, Extra) UsingPackDecl(nullptr, nullptr, None);
+  auto *Result =
+      new (C, ID, Extra) UsingPackDecl(nullptr, nullptr, std::nullopt);
   Result->NumExpansions = NumExpansions;
   auto *Trail = Result->getTrailingObjects<NamedDecl *>();
   for (unsigned I = 0; I != NumExpansions; ++I)
@@ -3260,7 +3278,7 @@ DecompositionDecl *DecompositionDecl::CreateDeserialized(ASTContext &C,
   size_t Extra = additionalSizeToAlloc<BindingDecl *>(NumBindings);
   auto *Result = new (C, ID, Extra)
       DecompositionDecl(C, nullptr, SourceLocation(), SourceLocation(),
-                        QualType(), nullptr, StorageClass(), None);
+                        QualType(), nullptr, StorageClass(), std::nullopt);
   // Set up and clean out the bindings array.
   Result->NumBindings = NumBindings;
   auto *Trail = Result->getTrailingObjects<BindingDecl *>();

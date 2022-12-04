@@ -42,7 +42,8 @@ static const unsigned NVPTXAddrSpaceMap[] = {
     0, // sycl_private
     0, // ptr32_sptr
     0, // ptr32_uptr
-    0  // ptr64
+    0, // ptr64
+    0, // hlsl_groupshared
 };
 
 /// The DWARF address class. Taken from
@@ -86,7 +87,7 @@ public:
 
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {
     // No aliases.
-    return None;
+    return std::nullopt;
   }
 
   bool validateAsmConstraint(const char *&Name,
@@ -161,7 +162,7 @@ public:
   getDWARFAddressSpace(unsigned AddressSpace) const override {
     if (AddressSpace >= std::size(NVPTXDWARFAddrSpaceMap) ||
         NVPTXDWARFAddrSpaceMap[AddressSpace] < 0)
-      return llvm::None;
+      return std::nullopt;
     return NVPTXDWARFAddrSpaceMap[AddressSpace];
   }
 
@@ -176,6 +177,8 @@ public:
   }
 
   bool hasBitIntType() const override { return true; }
+  bool hasBFloat16Type() const override { return true; }
+  const char *getBFloat16Mangling() const override { return "u6__bf16"; };
 };
 } // namespace targets
 } // namespace clang

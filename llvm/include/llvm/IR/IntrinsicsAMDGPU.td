@@ -343,6 +343,7 @@ def int_amdgcn_rsq_legacy :  ClangBuiltin<"__builtin_amdgcn_rsq_legacy">,
 def int_amdgcn_rsq_clamp : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem, IntrSpeculatable, IntrWillReturn]>;
 
+// For int_amdgcn_ldexp_f16, only the low 16 bits of the i32 src1 operand will used.
 def int_amdgcn_ldexp : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable, IntrWillReturn]
@@ -2066,6 +2067,10 @@ def int_amdgcn_wmma_bf16_16x16x16_bf16 : AMDGPUWmmaIntrinsicOPSEL<llvm_v16i16_ty
 def int_amdgcn_wmma_i32_16x16x16_iu8   : AMDGPUWmmaIntrinsicIU<llvm_v4i32_ty, llvm_anyint_ty>;
 def int_amdgcn_wmma_i32_16x16x16_iu4   : AMDGPUWmmaIntrinsicIU<llvm_v2i32_ty, llvm_anyint_ty>;
 
+def int_amdgcn_s_wait_event_export_ready :
+  ClangBuiltin<"__builtin_amdgcn_s_wait_event_export_ready">,
+  Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrWillReturn]
+>;
 
 //===----------------------------------------------------------------------===//
 // Deep learning intrinsics.

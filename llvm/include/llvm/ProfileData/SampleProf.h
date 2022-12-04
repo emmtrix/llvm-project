@@ -303,6 +303,13 @@ struct LineLocation {
   uint32_t Discriminator;
 };
 
+struct LineLocationHash {
+  uint64_t operator()(const LineLocation &Loc) const {
+    return std::hash<std::uint64_t>{}((((uint64_t)Loc.LineOffset) << 32) |
+                                      Loc.Discriminator);
+  }
+};
+
 raw_ostream &operator<<(raw_ostream &OS, const LineLocation &Loc);
 
 /// Representation of a single sample record.
@@ -919,12 +926,16 @@ public:
     return CallsiteSamples;
   }
 
-  /// Return the maximum of sample counts in a function body including functions
-  /// inlined in it.
-  uint64_t getMaxCountInside() const {
+  /// Return the maximum of sample counts in a function body. When SkipCallSite
+  /// is false, which is the default, the return count includes samples in the
+  /// inlined functions. When SkipCallSite is true, the return count only
+  /// considers the body samples.
+  uint64_t getMaxCountInside(bool SkipCallSite = false) const {
     uint64_t MaxCount = 0;
     for (const auto &L : getBodySamples())
       MaxCount = std::max(MaxCount, L.second.getSamples());
+    if (SkipCallSite)
+      return MaxCount;
     for (const auto &C : getCallsiteSamples())
       for (const FunctionSamplesMap::value_type &F : C.second)
         MaxCount = std::max(MaxCount, F.second.getMaxCountInside());

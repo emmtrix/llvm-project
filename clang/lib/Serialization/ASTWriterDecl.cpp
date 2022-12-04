@@ -107,6 +107,8 @@ namespace clang {
     void VisitNonTypeTemplateParmDecl(NonTypeTemplateParmDecl *D);
     void VisitTemplateDecl(TemplateDecl *D);
     void VisitConceptDecl(ConceptDecl *D);
+    void VisitImplicitConceptSpecializationDecl(
+        ImplicitConceptSpecializationDecl *D);
     void VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D);
     void VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D);
     void VisitClassTemplateDecl(ClassTemplateDecl *D);
@@ -122,6 +124,7 @@ namespace clang {
     void VisitLinkageSpecDecl(LinkageSpecDecl *D);
     void VisitExportDecl(ExportDecl *D);
     void VisitFileScopeAsmDecl(FileScopeAsmDecl *D);
+    void VisitTopLevelStmtDecl(TopLevelStmtDecl *D);
     void VisitImportDecl(ImportDecl *D);
     void VisitAccessSpecDecl(AccessSpecDecl *D);
     void VisitFriendDecl(FriendDecl *D);
@@ -202,7 +205,7 @@ namespace clang {
       return Common->PartialSpecializations;
     }
     ArrayRef<Decl> getPartialSpecializations(FunctionTemplateDecl::Common *) {
-      return None;
+      return std::nullopt;
     }
 
     template<typename DeclTy>
@@ -828,6 +831,7 @@ void ASTDeclWriter::VisitObjCProtocolDecl(ObjCProtocolDecl *D) {
       Record.AddDeclRef(I);
     for (const auto &PL : D->protocol_locs())
       Record.AddSourceLocation(PL);
+    Record.push_back(D->getODRHash());
   }
 
   Code = serialization::DECL_OBJC_PROTOCOL;
@@ -1168,6 +1172,12 @@ void ASTDeclWriter::VisitFileScopeAsmDecl(FileScopeAsmDecl *D) {
   Code = serialization::DECL_FILE_SCOPE_ASM;
 }
 
+void ASTDeclWriter::VisitTopLevelStmtDecl(TopLevelStmtDecl *D) {
+  VisitDecl(D);
+  Record.AddStmt(D->getStmt());
+  Code = serialization::DECL_TOP_LEVEL_STMT_DECL;
+}
+
 void ASTDeclWriter::VisitEmptyDecl(EmptyDecl *D) {
   VisitDecl(D);
   Code = serialization::DECL_EMPTY;
@@ -1249,6 +1259,7 @@ void ASTDeclWriter::VisitNamespaceDecl(NamespaceDecl *D) {
   VisitRedeclarable(D);
   VisitNamedDecl(D);
   Record.push_back(D->isInline());
+  Record.push_back(D->isNested());
   Record.AddSourceLocation(D->getBeginLoc());
   Record.AddSourceLocation(D->getRBraceLoc());
 
@@ -1514,6 +1525,15 @@ void ASTDeclWriter::VisitConceptDecl(ConceptDecl *D) {
   VisitTemplateDecl(D);
   Record.AddStmt(D->getConstraintExpr());
   Code = serialization::DECL_CONCEPT;
+}
+
+void ASTDeclWriter::VisitImplicitConceptSpecializationDecl(
+    ImplicitConceptSpecializationDecl *D) {
+  Record.push_back(D->getTemplateArguments().size());
+  VisitDecl(D);
+  for (const TemplateArgument &Arg : D->getTemplateArguments())
+    Record.AddTemplateArgument(Arg);
+  Code = serialization::DECL_IMPLICIT_CONCEPT_SPECIALIZATION;
 }
 
 void ASTDeclWriter::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
@@ -2405,7 +2425,7 @@ static bool isRequiredDecl(const Decl *D, ASTContext &Context,
 
   // File scoped assembly or obj-c or OMP declare target implementation must be
   // seen.
-  if (isa<FileScopeAsmDecl>(D) || isa<ObjCImplDecl>(D))
+  if (isa<FileScopeAsmDecl, TopLevelStmtDecl, ObjCImplDecl>(D))
     return true;
 
   if (WritingModule && isPartOfPerModuleInitializer(D)) {
@@ -2445,11 +2465,12 @@ void ASTWriter::WriteDecl(ASTContext &Context, Decl *D) {
   SourceLocation Loc = D->getLocation();
   unsigned Index = ID - FirstDeclID;
   if (DeclOffsets.size() == Index)
-    DeclOffsets.emplace_back(Loc, Offset, DeclTypesBlockStartOffset);
+    DeclOffsets.emplace_back(getAdjustedLocation(Loc), Offset,
+                             DeclTypesBlockStartOffset);
   else if (DeclOffsets.size() < Index) {
     // FIXME: Can/should this happen?
     DeclOffsets.resize(Index+1);
-    DeclOffsets[Index].setLocation(Loc);
+    DeclOffsets[Index].setLocation(getAdjustedLocation(Loc));
     DeclOffsets[Index].setBitOffset(Offset, DeclTypesBlockStartOffset);
   } else {
     llvm_unreachable("declarations should be emitted in ID order");

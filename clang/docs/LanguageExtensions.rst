@@ -66,6 +66,35 @@ It can be used like this:
   ``__has_builtin`` should not be used to detect support for a builtin macro;
   use ``#ifdef`` instead.
 
+``__has_constexpr_builtin``
+---------------------------
+
+This function-like macro takes a single identifier argument that is the name of
+a builtin function, a builtin pseudo-function (taking one or more type
+arguments), or a builtin template.
+It evaluates to 1 if the builtin is supported and can be constant evaluated or
+0 if not. It can be used for writing conditionally constexpr code like this:
+
+.. code-block:: c++
+
+  #ifndef __has_constexpr_builtin         // Optional of course.
+    #define __has_constexpr_builtin(x) 0  // Compatibility with non-clang compilers.
+  #endif
+
+  ...
+  #if __has_constexpr_builtin(__builtin_fmax)
+    constexpr
+  #endif
+    double money_fee(double amount) {
+        return __builtin_fmax(amount * 0.03, 10.0);
+    }
+  ...
+
+For example, ``__has_constexpr_builtin`` is used in libcxx's implementation of
+the ``<cmath>`` header file to conditionally make a function constexpr whenever
+the constant evaluation of the corresponding builtin (for example,
+``std::fmax`` calls ``__builtin_fmax``) is supported in Clang.
+
 .. _langext-__has_feature-__has_extension:
 
 ``__has_feature`` and ``__has_extension``
@@ -603,6 +632,8 @@ Unless specified otherwise operation(±0) = ±0 and operation(±infinity) = ±in
  T __builtin_elementwise_abs(T x)            return the absolute value of a number x; the absolute value of   signed integer and floating point types
                                              the most negative integer remains the most negative integer
  T __builtin_elementwise_ceil(T x)           return the smallest integral value greater than or equal to x    floating point types
+ T __builtin_elementwise_sin(T x)            return the sine of x interpreted as an angle in radians          floating point types
+ T __builtin_elementwise_cos(T x)            return the cosine of x interpreted as an angle in radians        floating point types
  T __builtin_elementwise_floor(T x)          return the largest integral value less than or equal to x        floating point types
  T __builtin_elementwise_roundeven(T x)      round x to the nearest integer value in floating point format,   floating point types
                                              rounding halfway cases to even (that is, to the nearest value

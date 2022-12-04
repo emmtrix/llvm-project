@@ -761,15 +761,19 @@ canonicalizeImmediatelyDeclaredConstraint(const ASTContext &C, Expr *IDC,
     NewConverted.push_back(ConstrainedType);
     llvm::append_range(NewConverted, OldConverted.drop_front(1));
   }
+  auto *CSD = ImplicitConceptSpecializationDecl::Create(
+      C, CSE->getNamedConcept()->getDeclContext(),
+      CSE->getNamedConcept()->getLocation(), NewConverted);
+
   Expr *NewIDC = ConceptSpecializationExpr::Create(
-      C, CSE->getNamedConcept(), NewConverted, nullptr,
-      CSE->isInstantiationDependent(), CSE->containsUnexpandedParameterPack());
+      C, CSE->getNamedConcept(), CSD, nullptr, CSE->isInstantiationDependent(),
+      CSE->containsUnexpandedParameterPack());
 
   if (auto *OrigFold = dyn_cast<CXXFoldExpr>(IDC))
     NewIDC = new (C) CXXFoldExpr(
-        OrigFold->getType(), /*Callee*/nullptr, SourceLocation(), NewIDC,
+        OrigFold->getType(), /*Callee*/ nullptr, SourceLocation(), NewIDC,
         BinaryOperatorKind::BO_LAnd, SourceLocation(), /*RHS=*/nullptr,
-        SourceLocation(), /*NumExpansions=*/None);
+        SourceLocation(), /*NumExpansions=*/std::nullopt);
   return NewIDC;
 }
 
@@ -793,12 +797,13 @@ ASTContext::getCanonicalTemplateTemplateParmDecl(
                                           PEnd = Params->end();
        P != PEnd; ++P) {
     if (const auto *TTP = dyn_cast<TemplateTypeParmDecl>(*P)) {
-      TemplateTypeParmDecl *NewTTP = TemplateTypeParmDecl::Create(*this,
-          getTranslationUnitDecl(), SourceLocation(), SourceLocation(),
+      TemplateTypeParmDecl *NewTTP = TemplateTypeParmDecl::Create(
+          *this, getTranslationUnitDecl(), SourceLocation(), SourceLocation(),
           TTP->getDepth(), TTP->getIndex(), nullptr, false,
           TTP->isParameterPack(), TTP->hasTypeConstraint(),
-          TTP->isExpandedParameterPack() ?
-          llvm::Optional<unsigned>(TTP->getNumExpansionParameters()) : None);
+          TTP->isExpandedParameterPack()
+              ? llvm::Optional<unsigned>(TTP->getNumExpansionParameters())
+              : std::nullopt);
       if (const auto *TC = TTP->getTypeConstraint()) {
         QualType ParamAsArgument(NewTTP->getTypeForDecl(), 0);
         Expr *NewIDC = canonicalizeImmediatelyDeclaredConstraint(
@@ -949,7 +954,8 @@ static const LangASMap *getAddressSpaceMap(const TargetInfo &T,
         0,  // sycl_private
         10, // ptr32_sptr
         11, // ptr32_uptr
-        12  // ptr64
+        12, // ptr64
+        13, // hlsl_groupshared
     };
     return &FakeAddrSpaceMap;
   } else {
@@ -1134,7 +1140,7 @@ ASTContext::getModulesWithMergedDefinition(const NamedDecl *Def) {
   auto MergedIt =
       MergedDefModules.find(cast<NamedDecl>(Def->getCanonicalDecl()));
   if (MergedIt == MergedDefModules.end())
-    return None;
+    return std::nullopt;
   return MergedIt->second;
 }
 
@@ -1192,7 +1198,7 @@ void ASTContext::addLazyModuleInitializers(Module *M, ArrayRef<uint32_t> IDs) {
 ArrayRef<Decl *> ASTContext::getModuleInitializers(Module *M) {
   auto It = ModuleInitializers.find(M);
   if (It == ModuleInitializers.end())
-    return None;
+    return std::nullopt;
 
   auto *Inits = It->second;
   Inits->resolve(*this);
@@ -1874,7 +1880,7 @@ static getConstantArrayInfoInChars(const ASTContext &Context,
   uint64_t Width = EltInfo.Width.getQuantity() * Size;
   unsigned Align = EltInfo.Align.getQuantity();
   if (!Context.getTargetInfo().getCXXABI().isMicrosoft() ||
-      Context.getTargetInfo().getPointerWidth(0) == 64)
+      Context.getTargetInfo().getPointerWidth(LangAS::Default) == 64)
     Width = llvm::alignTo(Width, Align);
   return TypeInfoChars(CharUnits::fromQuantity(Width),
                        CharUnits::fromQuantity(Align),
@@ -1891,6 +1897,44 @@ TypeInfoChars ASTContext::getTypeInfoInChars(const Type *T) const {
 
 TypeInfoChars ASTContext::getTypeInfoInChars(QualType T) const {
   return getTypeInfoInChars(T.getTypePtr());
+}
+
+bool ASTContext::isPromotableIntegerType(QualType T) const {
+  // HLSL doesn't promote all small integer types to int, it
+  // just uses the rank-based promotion rules for all types.
+  if (getLangOpts().HLSL)
+    return false;
+
+  if (const auto *BT = T->getAs<BuiltinType>())
+    switch (BT->getKind()) {
+    case BuiltinType::Bool:
+    case BuiltinType::Char_S:
+    case BuiltinType::Char_U:
+    case BuiltinType::SChar:
+    case BuiltinType::UChar:
+    case BuiltinType::Short:
+    case BuiltinType::UShort:
+    case BuiltinType::WChar_S:
+    case BuiltinType::WChar_U:
+    case BuiltinType::Char8:
+    case BuiltinType::Char16:
+    case BuiltinType::Char32:
+      return true;
+    default:
+      return false;
+    }
+
+  // Enumerated types are promotable to their compatible integer types
+  // (C99 6.3.1.1) a.k.a. its underlying type (C++ [conv.prom]p2).
+  if (const auto *ET = T->getAs<EnumType>()) {
+    if (T->isDependentType() || ET->getDecl()->getPromotionType().isNull() ||
+        ET->getDecl()->isScoped())
+      return false;
+
+    return true;
+  }
+
+  return false;
 }
 
 bool ASTContext::isAlignmentRequired(const Type *T) const {
@@ -1947,7 +1991,7 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   uint64_t Width = 0;
   unsigned Align = 8;
   AlignRequirementKind AlignRequirement = AlignRequirementKind::None;
-  unsigned AS = 0;
+  LangAS AS = LangAS::Default;
   switch (T->getTypeClass()) {
 #define TYPE(Class, Base)
 #define ABSTRACT_TYPE(Class, Base)
@@ -1982,7 +2026,7 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     Align = EltInfo.Align;
     AlignRequirement = EltInfo.AlignRequirement;
     if (!getTargetInfo().getCXXABI().isMicrosoft() ||
-        getTargetInfo().getPointerWidth(0) == 64)
+        getTargetInfo().getPointerWidth(LangAS::Default) == 64)
       Width = llvm::alignTo(Width, Align);
     break;
   }
@@ -2182,14 +2226,15 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       }
       break;
     case BuiltinType::NullPtr:
-      Width = Target->getPointerWidth(0); // C++ 3.9.1p11: sizeof(nullptr_t)
-      Align = Target->getPointerAlign(0); //   == sizeof(void*)
+      // C++ 3.9.1p11: sizeof(nullptr_t) == sizeof(void*)
+      Width = Target->getPointerWidth(LangAS::Default);
+      Align = Target->getPointerAlign(LangAS::Default);
       break;
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
     case BuiltinType::ObjCSel:
-      Width = Target->getPointerWidth(0);
-      Align = Target->getPointerAlign(0);
+      Width = Target->getPointerWidth(LangAS::Default);
+      Align = Target->getPointerAlign(LangAS::Default);
       break;
     case BuiltinType::OCLSampler:
     case BuiltinType::OCLEvent:
@@ -2202,8 +2247,7 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
 #define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
   case BuiltinType::Id:
 #include "clang/Basic/OpenCLExtensionTypes.def"
-      AS = getTargetAddressSpace(
-          Target->getOpenCLTypeAddrSpace(getOpenCLTypeKind(T)));
+      AS = Target->getOpenCLTypeAddrSpace(getOpenCLTypeKind(T));
       Width = Target->getPointerWidth(AS);
       Align = Target->getPointerAlign(AS);
       break;
@@ -2248,11 +2292,11 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     }
     break;
   case Type::ObjCObjectPointer:
-    Width = Target->getPointerWidth(0);
-    Align = Target->getPointerAlign(0);
+    Width = Target->getPointerWidth(LangAS::Default);
+    Align = Target->getPointerAlign(LangAS::Default);
     break;
   case Type::BlockPointer:
-    AS = getTargetAddressSpace(cast<BlockPointerType>(T)->getPointeeType());
+    AS = cast<BlockPointerType>(T)->getPointeeType().getAddressSpace();
     Width = Target->getPointerWidth(AS);
     Align = Target->getPointerAlign(AS);
     break;
@@ -2260,12 +2304,12 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   case Type::RValueReference:
     // alignof and sizeof should never enter this code path here, so we go
     // the pointer route.
-    AS = getTargetAddressSpace(cast<ReferenceType>(T)->getPointeeType());
+    AS = cast<ReferenceType>(T)->getPointeeType().getAddressSpace();
     Width = Target->getPointerWidth(AS);
     Align = Target->getPointerAlign(AS);
     break;
   case Type::Pointer:
-    AS = getTargetAddressSpace(cast<PointerType>(T)->getPointeeType());
+    AS = cast<PointerType>(T)->getPointeeType().getAddressSpace();
     Width = Target->getPointerWidth(AS);
     Align = Target->getPointerAlign(AS);
     break;
@@ -2422,8 +2466,8 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   break;
 
   case Type::Pipe:
-    Width = Target->getPointerWidth(getTargetAddressSpace(LangAS::opencl_global));
-    Align = Target->getPointerAlign(getTargetAddressSpace(LangAS::opencl_global));
+    Width = Target->getPointerWidth(LangAS::opencl_global);
+    Align = Target->getPointerAlign(LangAS::opencl_global);
     break;
   }
 
@@ -2700,7 +2744,7 @@ getSubobjectSizeInBits(const FieldDecl *Field, const ASTContext &Context) {
   bool IsBitIntType = Field->getType()->isBitIntType();
   if (!Field->getType()->isReferenceType() && !IsBitIntType &&
       !Context.hasUniqueObjectRepresentations(Field->getType()))
-    return llvm::None;
+    return std::nullopt;
 
   int64_t FieldSizeInBits =
       Context.toBits(Context.getTypeSizeInChars(Field->getType()));
@@ -2709,14 +2753,14 @@ getSubobjectSizeInBits(const FieldDecl *Field, const ASTContext &Context) {
     if (IsBitIntType) {
       if ((unsigned)BitfieldSize >
           cast<BitIntType>(Field->getType())->getNumBits())
-        return llvm::None;
+        return std::nullopt;
     } else if (BitfieldSize > FieldSizeInBits) {
-      return llvm::None;
+      return std::nullopt;
     }
     FieldSizeInBits = BitfieldSize;
   } else if (IsBitIntType &&
              !Context.hasUniqueObjectRepresentations(Field->getType())) {
-    return llvm::None;
+    return std::nullopt;
   }
   return FieldSizeInBits;
 }
@@ -2734,11 +2778,11 @@ static llvm::Optional<int64_t> structSubobjectsHaveUniqueObjectRepresentations(
     llvm::Optional<int64_t> SizeInBits =
         getSubobjectSizeInBits(Subobject, Context);
     if (!SizeInBits)
-      return llvm::None;
+      return std::nullopt;
     if (*SizeInBits != 0) {
       int64_t Offset = getSubobjectOffset(Subobject, Context, Layout);
       if (Offset != CurOffsetInBits)
-        return llvm::None;
+        return std::nullopt;
       CurOffsetInBits += *SizeInBits;
     }
   }
@@ -2754,7 +2798,7 @@ structHasUniqueObjectRepresentations(const ASTContext &Context,
   int64_t CurOffsetInBits = 0;
   if (const auto *ClassDecl = dyn_cast<CXXRecordDecl>(RD)) {
     if (ClassDecl->isDynamicClass())
-      return llvm::None;
+      return std::nullopt;
 
     SmallVector<CXXRecordDecl *, 4> Bases;
     for (const auto &Base : ClassDecl->bases()) {
@@ -2771,7 +2815,7 @@ structHasUniqueObjectRepresentations(const ASTContext &Context,
         structSubobjectsHaveUniqueObjectRepresentations(Bases, CurOffsetInBits,
                                                         Context, Layout);
     if (!OffsetAfterBases)
-      return llvm::None;
+      return std::nullopt;
     CurOffsetInBits = *OffsetAfterBases;
   }
 
@@ -2779,7 +2823,7 @@ structHasUniqueObjectRepresentations(const ASTContext &Context,
       structSubobjectsHaveUniqueObjectRepresentations(
           RD->fields(), CurOffsetInBits, Context, Layout);
   if (!OffsetAfterFields)
-    return llvm::None;
+    return std::nullopt;
   CurOffsetInBits = *OffsetAfterFields;
 
   return CurOffsetInBits;
@@ -3000,6 +3044,18 @@ const ASTRecordLayout &
 ASTContext::getASTObjCImplementationLayout(
                                         const ObjCImplementationDecl *D) const {
   return getObjCLayout(D->getClassInterface(), D);
+}
+
+static auto getCanonicalTemplateArguments(const ASTContext &C,
+                                          ArrayRef<TemplateArgument> Args,
+                                          bool &AnyNonCanonArgs) {
+  SmallVector<TemplateArgument, 16> CanonArgs(Args);
+  for (auto &Arg : CanonArgs) {
+    TemplateArgument OrigArg = Arg;
+    Arg = C.getCanonicalTemplateArgument(Arg);
+    AnyNonCanonArgs |= !Arg.structurallyEquals(OrigArg);
+  }
+  return CanonArgs;
 }
 
 //===----------------------------------------------------------------------===//
@@ -4809,31 +4865,38 @@ ASTContext::getSubstTemplateTypeParmType(QualType Replacement,
 }
 
 /// Retrieve a
-QualType ASTContext::getSubstTemplateTypeParmPackType(
-    Decl *AssociatedDecl, unsigned Index, const TemplateArgument &ArgPack) {
+QualType
+ASTContext::getSubstTemplateTypeParmPackType(Decl *AssociatedDecl,
+                                             unsigned Index, bool Final,
+                                             const TemplateArgument &ArgPack) {
 #ifndef NDEBUG
-  for (const auto &P : ArgPack.pack_elements()) {
+  for (const auto &P : ArgPack.pack_elements())
     assert(P.getKind() == TemplateArgument::Type && "Pack contains a non-type");
-    assert(P.getAsType().isCanonical() && "Pack contains non-canonical type");
-  }
 #endif
 
   llvm::FoldingSetNodeID ID;
-  SubstTemplateTypeParmPackType::Profile(ID, AssociatedDecl, Index, ArgPack);
+  SubstTemplateTypeParmPackType::Profile(ID, AssociatedDecl, Index, Final,
+                                         ArgPack);
   void *InsertPos = nullptr;
   if (SubstTemplateTypeParmPackType *SubstParm =
           SubstTemplateTypeParmPackTypes.FindNodeOrInsertPos(ID, InsertPos))
     return QualType(SubstParm, 0);
 
   QualType Canon;
-  if (!AssociatedDecl->isCanonicalDecl()) {
-    Canon = getSubstTemplateTypeParmPackType(AssociatedDecl->getCanonicalDecl(),
-                                             Index, ArgPack);
-    SubstTemplateTypeParmPackTypes.FindNodeOrInsertPos(ID, InsertPos);
+  {
+    TemplateArgument CanonArgPack = getCanonicalTemplateArgument(ArgPack);
+    if (!AssociatedDecl->isCanonicalDecl() ||
+        !CanonArgPack.structurallyEquals(ArgPack)) {
+      Canon = getSubstTemplateTypeParmPackType(
+          AssociatedDecl->getCanonicalDecl(), Index, Final, CanonArgPack);
+      [[maybe_unused]] const auto *Nothing =
+          SubstTemplateTypeParmPackTypes.FindNodeOrInsertPos(ID, InsertPos);
+      assert(!Nothing);
+    }
   }
 
-  auto *SubstParm = new (*this, TypeAlignment)
-      SubstTemplateTypeParmPackType(Canon, AssociatedDecl, Index, ArgPack);
+  auto *SubstParm = new (*this, TypeAlignment) SubstTemplateTypeParmPackType(
+      Canon, AssociatedDecl, Index, Final, ArgPack);
   Types.push_back(SubstParm);
   SubstTemplateTypeParmPackTypes.InsertNode(SubstParm, InsertPos);
   return QualType(SubstParm, 0);
@@ -4958,23 +5021,6 @@ ASTContext::getTemplateSpecializationType(TemplateName Template,
   return QualType(Spec, 0);
 }
 
-static bool
-getCanonicalTemplateArguments(const ASTContext &C,
-                              ArrayRef<TemplateArgument> OrigArgs,
-                              SmallVectorImpl<TemplateArgument> &CanonArgs) {
-  bool AnyNonCanonArgs = false;
-  unsigned NumArgs = OrigArgs.size();
-  CanonArgs.resize(NumArgs);
-  for (unsigned I = 0; I != NumArgs; ++I) {
-    const TemplateArgument &OrigArg = OrigArgs[I];
-    TemplateArgument &CanonArg = CanonArgs[I];
-    CanonArg = C.getCanonicalTemplateArgument(OrigArg);
-    if (!CanonArg.structurallyEquals(OrigArg))
-      AnyNonCanonArgs = true;
-  }
-  return AnyNonCanonArgs;
-}
-
 QualType ASTContext::getCanonicalTemplateSpecializationType(
     TemplateName Template, ArrayRef<TemplateArgument> Args) const {
   assert(!Template.getAsDependentTemplateName() &&
@@ -4986,8 +5032,9 @@ QualType ASTContext::getCanonicalTemplateSpecializationType(
 
   // Build the canonical template specialization type.
   TemplateName CanonTemplate = getCanonicalTemplateName(Template);
-  SmallVector<TemplateArgument, 4> CanonArgs;
-  ::getCanonicalTemplateArguments(*this, Args, CanonArgs);
+  bool AnyNonCanonArgs = false;
+  auto CanonArgs =
+      ::getCanonicalTemplateArguments(*this, Args, AnyNonCanonArgs);
 
   // Determine whether this canonical template specialization type already
   // exists.
@@ -5107,12 +5154,9 @@ QualType ASTContext::getDependentNameType(ElaboratedTypeKeyword Keyword,
   return QualType(T, 0);
 }
 
-QualType
-ASTContext::getDependentTemplateSpecializationType(
-                                 ElaboratedTypeKeyword Keyword,
-                                 NestedNameSpecifier *NNS,
-                                 const IdentifierInfo *Name,
-                                 const TemplateArgumentListInfo &Args) const {
+QualType ASTContext::getDependentTemplateSpecializationType(
+    ElaboratedTypeKeyword Keyword, NestedNameSpecifier *NNS,
+    const IdentifierInfo *Name, ArrayRef<TemplateArgumentLoc> Args) const {
   // TODO: avoid this copy
   SmallVector<TemplateArgument, 16> ArgCopy;
   for (unsigned I = 0, E = Args.size(); I != E; ++I)
@@ -5144,9 +5188,9 @@ ASTContext::getDependentTemplateSpecializationType(
   ElaboratedTypeKeyword CanonKeyword = Keyword;
   if (Keyword == ETK_None) CanonKeyword = ETK_Typename;
 
-  SmallVector<TemplateArgument, 16> CanonArgs;
-  bool AnyNonCanonArgs =
-      ::getCanonicalTemplateArguments(*this, Args, CanonArgs);
+  bool AnyNonCanonArgs = false;
+  auto CanonArgs =
+      ::getCanonicalTemplateArguments(*this, Args, AnyNonCanonArgs);
 
   QualType Canon;
   if (AnyNonCanonArgs || CanonNNS != NNS || CanonKeyword != Keyword) {
@@ -5175,7 +5219,7 @@ TemplateArgument ASTContext::getInjectedTemplateArg(NamedDecl *Param) {
   if (const auto *TTP = dyn_cast<TemplateTypeParmDecl>(Param)) {
     QualType ArgType = getTypeDeclType(TTP);
     if (TTP->isParameterPack())
-      ArgType = getPackExpansionType(ArgType, None);
+      ArgType = getPackExpansionType(ArgType, std::nullopt);
 
     Arg = TemplateArgument(ArgType);
   } else if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(Param)) {
@@ -5192,8 +5236,8 @@ TemplateArgument ASTContext::getInjectedTemplateArg(NamedDecl *Param) {
         Expr::getValueKindForType(NTTP->getType()), NTTP->getLocation());
 
     if (NTTP->isParameterPack())
-      E = new (*this) PackExpansionExpr(DependentTy, E, NTTP->getLocation(),
-                                        None);
+      E = new (*this)
+          PackExpansionExpr(DependentTy, E, NTTP->getLocation(), std::nullopt);
     Arg = TemplateArgument(E);
   } else {
     auto *TTP = cast<TemplateTemplateParmDecl>(Param);
@@ -5932,14 +5976,14 @@ QualType ASTContext::getUIntPtrType() const {
 /// getPointerDiffType - Return the unique type for "ptrdiff_t" (C99 7.17)
 /// defined in <stddef.h>. Pointer - pointer requires this (C99 6.5.6p9).
 QualType ASTContext::getPointerDiffType() const {
-  return getFromTargetType(Target->getPtrDiffType(0));
+  return getFromTargetType(Target->getPtrDiffType(LangAS::Default));
 }
 
 /// Return the unique unsigned counterpart of "ptrdiff_t"
 /// integer type. The standard (C11 7.21.6.1p7) refers to this type
 /// in the definition of %tu format specifier.
 QualType ASTContext::getUnsignedPointerDiffType() const {
-  return getFromTargetType(Target->getUnsignedPtrDiffType(0));
+  return getFromTargetType(Target->getUnsignedPtrDiffType(LangAS::Default));
 }
 
 /// Return the unique type for "pid_t" defined in
@@ -6245,7 +6289,7 @@ ASTContext::getCanonicalTemplateName(const TemplateName &Name) const {
         getCanonicalTemplateArgument(subst->getArgumentPack());
     return getSubstTemplateTemplateParmPack(
         canonArgPack, subst->getAssociatedDecl()->getCanonicalDecl(),
-        subst->getIndex());
+        subst->getFinal(), subst->getIndex());
   }
   }
 
@@ -6477,7 +6521,7 @@ bool ASTContext::FriendsDifferByConstraints(const FunctionDecl *X,
   if (!X->getFriendObjectKind() || !Y->getFriendObjectKind())
     return false;
 
-  // If the the two functions share lexical declaration context, they are not in
+  // If the two functions share lexical declaration context, they are not in
   // separate instantations, and thus in the same scope.
   if (X->getLexicalDeclContext() == Y->getLexicalDeclContext())
     return false;
@@ -6731,7 +6775,7 @@ ASTContext::getCanonicalTemplateArgument(const TemplateArgument &Arg) const {
 
     case TemplateArgument::Declaration: {
       auto *D = cast<ValueDecl>(Arg.getAsDecl()->getCanonicalDecl());
-      return TemplateArgument(D, Arg.getParamTypeForDecl());
+      return TemplateArgument(D, getCanonicalType(Arg.getParamTypeForDecl()));
     }
 
     case TemplateArgument::NullPtr:
@@ -6753,17 +6797,13 @@ ASTContext::getCanonicalTemplateArgument(const TemplateArgument &Arg) const {
       return TemplateArgument(getCanonicalType(Arg.getAsType()));
 
     case TemplateArgument::Pack: {
-      if (Arg.pack_size() == 0)
+      bool AnyNonCanonArgs = false;
+      auto CanonArgs = ::getCanonicalTemplateArguments(
+          *this, Arg.pack_elements(), AnyNonCanonArgs);
+      if (!AnyNonCanonArgs)
         return Arg;
-
-      auto *CanonArgs = new (*this) TemplateArgument[Arg.pack_size()];
-      unsigned Idx = 0;
-      for (TemplateArgument::pack_iterator A = Arg.pack_begin(),
-                                        AEnd = Arg.pack_end();
-           A != AEnd; (void)++A, ++Idx)
-        CanonArgs[Idx] = getCanonicalTemplateArgument(*A);
-
-      return TemplateArgument(llvm::makeArrayRef(CanonArgs, Arg.pack_size()));
+      return TemplateArgument::CreatePackCopy(const_cast<ASTContext &>(*this),
+                                              CanonArgs);
     }
   }
 
@@ -7127,7 +7167,7 @@ QualType ASTContext::isPromotableBitField(Expr *E) const {
 /// integer type.
 QualType ASTContext::getPromotedIntegerType(QualType Promotable) const {
   assert(!Promotable.isNull());
-  assert(Promotable->isPromotableIntegerType());
+  assert(isPromotableIntegerType(Promotable));
   if (const auto *ET = Promotable->getAs<EnumType>())
     return ET->getDecl()->getPromotionType();
 
@@ -8726,9 +8766,9 @@ CreateAArch64ABIBuiltinVaListDecl(const ASTContext *Context) {
     // namespace std { struct __va_list {
     auto *NS = NamespaceDecl::Create(
         const_cast<ASTContext &>(*Context), Context->getTranslationUnitDecl(),
-        /*Inline*/ false, SourceLocation(), SourceLocation(),
+        /*Inline=*/false, SourceLocation(), SourceLocation(),
         &Context->Idents.get("std"),
-        /*PrevDecl*/ nullptr);
+        /*PrevDecl=*/nullptr, /*Nested=*/false);
     NS->setImplicit();
     VaListTagDecl->setDeclContext(NS);
   }
@@ -8915,9 +8955,9 @@ CreateAAPCSABIBuiltinVaListDecl(const ASTContext *Context) {
     NamespaceDecl *NS;
     NS = NamespaceDecl::Create(const_cast<ASTContext &>(*Context),
                                Context->getTranslationUnitDecl(),
-                               /*Inline*/false, SourceLocation(),
+                               /*Inline=*/false, SourceLocation(),
                                SourceLocation(), &Context->Idents.get("std"),
-                               /*PrevDecl*/ nullptr);
+                               /*PrevDecl=*/nullptr, /*Nested=*/false);
     NS->setImplicit();
     VaListDecl->setDeclContext(NS);
   }
@@ -9271,11 +9311,11 @@ ASTContext::getSubstTemplateTemplateParm(TemplateName Replacement,
 TemplateName
 ASTContext::getSubstTemplateTemplateParmPack(const TemplateArgument &ArgPack,
                                              Decl *AssociatedDecl,
-                                             unsigned Index) const {
+                                             unsigned Index, bool Final) const {
   auto &Self = const_cast<ASTContext &>(*this);
   llvm::FoldingSetNodeID ID;
   SubstTemplateTemplateParmPackStorage::Profile(ID, Self, ArgPack,
-                                                AssociatedDecl, Index);
+                                                AssociatedDecl, Index, Final);
 
   void *InsertPos = nullptr;
   SubstTemplateTemplateParmPackStorage *Subst
@@ -9283,7 +9323,7 @@ ASTContext::getSubstTemplateTemplateParmPack(const TemplateArgument &ArgPack,
 
   if (!Subst) {
     Subst = new (*this) SubstTemplateTemplateParmPackStorage(
-        ArgPack.pack_elements(), AssociatedDecl, Index);
+        ArgPack.pack_elements(), AssociatedDecl, Index, Final);
     SubstTemplateTemplateParmPacks.InsertNode(Subst, InsertPos);
   }
 
@@ -10328,7 +10368,7 @@ QualType ASTContext::mergeFunctionTypes(QualType lhs, QualType rhs,
           return {};
       }
 
-      if (paramTy->isPromotableIntegerType() ||
+      if (isPromotableIntegerType(paramTy) ||
           getCanonicalType(paramTy).getUnqualifiedType() == FloatTy)
         return {};
     }
@@ -11884,7 +11924,7 @@ MangleContext *ASTContext::createDeviceMangleContext(const TargetInfo &T) {
         [](ASTContext &, const NamedDecl *ND) -> llvm::Optional<unsigned> {
           if (const auto *RD = dyn_cast<CXXRecordDecl>(ND))
             return RD->getDeviceLambdaManglingNumber();
-          return llvm::None;
+          return std::nullopt;
         },
         /*IsAux=*/true);
   case TargetCXXABI::Microsoft:
@@ -12188,20 +12228,6 @@ uint64_t ASTContext::getTargetNullPointerValue(QualType QT) const {
   return getTargetInfo().getNullPointerValue(AS);
 }
 
-unsigned ASTContext::getTargetAddressSpace(QualType T) const {
-  // Return the address space for the type. If the type is a
-  // function type without an address space qualifier, the
-  // program address space is used. Otherwise, the target picks
-  // the best address space based on the type information
-  return T->isFunctionType() && !T.hasAddressSpace()
-             ? getTargetInfo().getProgramAddressSpace()
-             : getTargetAddressSpace(T.getQualifiers());
-}
-
-unsigned ASTContext::getTargetAddressSpace(Qualifiers Q) const {
-  return getTargetAddressSpace(Q.getAddressSpace());
-}
-
 unsigned ASTContext::getTargetAddressSpace(LangAS AS) const {
   if (isTargetAddressSpace(AS))
     return toTargetAddressSpace(AS);
@@ -12241,17 +12267,15 @@ static Decl *getCommonDecl(Decl *X, Decl *Y) {
   llvm_unreachable("Corrupt redecls chain");
 }
 
-template <class T,
-          std::enable_if_t<std::is_base_of<Decl, T>::value, bool> = true>
-T *getCommonDecl(T *X, T *Y) {
+template <class T, std::enable_if_t<std::is_base_of_v<Decl, T>, bool> = true>
+static T *getCommonDecl(T *X, T *Y) {
   return cast_or_null<T>(
       getCommonDecl(const_cast<Decl *>(cast_or_null<Decl>(X)),
                     const_cast<Decl *>(cast_or_null<Decl>(Y))));
 }
 
-template <class T,
-          std::enable_if_t<std::is_base_of<Decl, T>::value, bool> = true>
-T *getCommonDeclChecked(T *X, T *Y) {
+template <class T, std::enable_if_t<std::is_base_of_v<Decl, T>, bool> = true>
+static T *getCommonDeclChecked(T *X, T *Y) {
   return cast<T>(getCommonDecl(const_cast<Decl *>(cast<Decl>(X)),
                                const_cast<Decl *>(cast<Decl>(Y))));
 }

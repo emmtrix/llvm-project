@@ -395,7 +395,7 @@ public:
     Visit(T->getArgumentPack());
   }
   void VisitTemplateSpecializationType(const TemplateSpecializationType *T) {
-    for (const auto &Arg : *T)
+    for (const auto &Arg : T->template_arguments())
       Visit(Arg);
   }
   void VisitObjCObjectPointerType(const ObjCObjectPointerType *T) {
@@ -475,6 +475,8 @@ public:
   void VisitFileScopeAsmDecl(const FileScopeAsmDecl *D) {
     Visit(D->getAsmString());
   }
+
+  void VisitTopLevelStmtDecl(const TopLevelStmtDecl *D) { Visit(D->getStmt()); }
 
   void VisitCapturedDecl(const CapturedDecl *D) { Visit(D->getBody()); }
 
@@ -623,7 +625,14 @@ public:
     Visit(D->getConstraintExpr());
   }
 
+  void VisitImplicitConceptSpecializationDecl(
+      const ImplicitConceptSpecializationDecl *CSD) {
+    for (const TemplateArgument &Arg : CSD->getTemplateArguments())
+      Visit(Arg);
+  }
+
   void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *CSE) {
+    Visit(CSE->getSpecializationDecl());
     if (CSE->hasExplicitTemplateArgs())
       for (const auto &ArgLoc : CSE->getTemplateArgsAsWritten()->arguments())
         dumpTemplateArgumentLoc(ArgLoc);

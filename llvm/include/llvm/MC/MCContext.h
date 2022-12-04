@@ -178,7 +178,7 @@ private:
   /// The file name of the log file from the environment variable
   /// AS_SECURE_LOG_FILE.  Which must be set before the .secure_log_unique
   /// directive is used or it is an error.
-  char *SecureLogFile;
+  std::string SecureLogFile;
   /// The stream that gets written to for the .secure_log_unique directive.
   std::unique_ptr<raw_fd_ostream> SecureLog;
   /// Boolean toggled when .secure_log_unique / .secure_log_reset is seen to
@@ -672,11 +672,13 @@ public:
   bool hasXCOFFSection(StringRef Section,
                        XCOFF::CsectProperties CsectProp) const;
 
-  MCSectionXCOFF *getXCOFFSection(
-      StringRef Section, SectionKind K,
-      Optional<XCOFF::CsectProperties> CsectProp = None,
-      bool MultiSymbolsAllowed = false, const char *BeginSymName = nullptr,
-      Optional<XCOFF::DwarfSectionSubtypeFlags> DwarfSubtypeFlags = None);
+  MCSectionXCOFF *
+  getXCOFFSection(StringRef Section, SectionKind K,
+                  Optional<XCOFF::CsectProperties> CsectProp = std::nullopt,
+                  bool MultiSymbolsAllowed = false,
+                  const char *BeginSymName = nullptr,
+                  Optional<XCOFF::DwarfSectionSubtypeFlags> DwarfSubtypeFlags =
+                      std::nullopt);
 
   // Create and save a copy of STI and return a reference to the copy.
   MCSubtargetInfo &getSubtargetCopy(const MCSubtargetInfo &STI);
@@ -828,7 +830,7 @@ public:
 
   /// @}
 
-  char *getSecureLogFile() { return SecureLogFile; }
+  StringRef getSecureLogFile() { return SecureLogFile; }
   raw_fd_ostream *getSecureLog() { return SecureLog.get(); }
 
   void setSecureLog(std::unique_ptr<raw_fd_ostream> Value) {

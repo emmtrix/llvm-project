@@ -77,6 +77,17 @@ private:
   llvm::StringMap<Value *> Properties;
 };
 
+/// An equivalence relation for values. It obeys reflexivity, symmetry and
+/// transitivity. It does *not* include comparison of `Properties`.
+///
+/// Computes equivalence for these subclasses:
+/// * ReferenceValue, PointerValue -- pointee locations are equal. Does not
+///   compute deep equality of `Value` at said location.
+/// * TopBoolValue -- both are `TopBoolValue`s.
+///
+/// Otherwise, falls back to pointer equality.
+bool areEquivalentValues(const Value &Val1, const Value &Val2);
+
 /// Models a boolean.
 class BoolValue : public Value {
 public:
@@ -95,9 +106,6 @@ public:
 
 /// Models the trivially true formula, which is Top in the lattice of boolean
 /// formulas.
-///
-/// FIXME: Given the subtlety of comparison involving `TopBoolValue`, define
-/// `operator==` for `Value`.
 class TopBoolValue final : public BoolValue {
 public:
   TopBoolValue() : BoolValue(Kind::TopBool) {}

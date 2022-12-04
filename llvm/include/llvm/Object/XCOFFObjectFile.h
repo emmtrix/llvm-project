@@ -204,6 +204,10 @@ struct LoaderSectionHeader32 {
   support::big32_t OffsetToImpid;
   support::ubig32_t LengthOfStrTbl;
   support::big32_t OffsetToStrTbl;
+
+  uint64_t getOffsetToSymTbl() const {
+    return NumberOfSymTabEnt == 0 ? 0 : sizeof(LoaderSectionHeader32);
+  }
 };
 
 struct LoaderSectionHeader64 {
@@ -216,8 +220,40 @@ struct LoaderSectionHeader64 {
   support::big64_t OffsetToImpid;
   support::big64_t OffsetToStrTbl;
   support::big64_t OffsetToSymTbl;
-  char Padding[16];
-  support::big32_t OffsetToRelEnt;
+  support::big64_t OffsetToRelEnt;
+
+  uint64_t getOffsetToSymTbl() const { return OffsetToSymTbl; }
+};
+
+struct LoaderSectionSymbolEntry32 {
+  struct NameOffsetInStrTbl {
+    support::big32_t IsNameInStrTbl; // Zero indicates name in string table.
+    support::ubig32_t Offset;
+  };
+
+  char SymbolName[XCOFF::NameSize];
+  support::ubig32_t Value; // The virtual address of the symbol.
+  support::big16_t SectionNumber;
+  uint8_t SymbolType;
+  XCOFF::StorageClass StorageClass;
+  support::ubig32_t ImportFileID;
+  support::ubig32_t ParameterTypeCheck;
+
+  Expected<StringRef>
+  getSymbolName(const LoaderSectionHeader32 *LoaderSecHeader) const;
+};
+
+struct LoaderSectionSymbolEntry64 {
+  support::ubig64_t Value; // The virtual address of the symbol.
+  support::ubig32_t Offset;
+  support::big16_t SectionNumber;
+  uint8_t SymbolType;
+  XCOFF::StorageClass StorageClass;
+  support::ubig32_t ImportFileID;
+  support::ubig32_t ParameterTypeCheck;
+
+  Expected<StringRef>
+  getSymbolName(const LoaderSectionHeader64 *LoaderSecHeader) const;
 };
 
 template <typename AddressType> struct ExceptionSectionEntry {
@@ -494,8 +530,6 @@ private:
 
   DataRefImpl getSectionByType(XCOFF::SectionTypeFlags SectType) const;
   uint64_t getSectionFileOffsetToRawData(DataRefImpl Sec) const;
-  Expected<uintptr_t>
-  getSectionFileOffsetToRawData(XCOFF::SectionTypeFlags SectType) const;
 
   // This returns a pointer to the start of the storage for the name field of
   // the 32-bit or 64-bit SectionHeader struct. This string is *not* necessarily
@@ -637,6 +671,9 @@ public:
 
   int32_t getSectionFlags(DataRefImpl Sec) const;
   Expected<DataRefImpl> getSectionByNum(int16_t Num) const;
+
+  Expected<uintptr_t>
+  getSectionFileOffsetToRawData(XCOFF::SectionTypeFlags SectType) const;
 
   void checkSymbolEntryPointer(uintptr_t SymbolEntPtr) const;
 

@@ -41,6 +41,7 @@
 #include "clang/Serialization/InMemoryModuleCache.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/BuryPointer.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Errc.h"
@@ -251,7 +252,8 @@ static void collectIncludePCH(CompilerInstance &CI,
     // used here since we're not interested in validating the PCH at this time,
     // but only to check whether this is a file containing an AST.
     if (!ASTReader::readASTFileControlBlock(
-            Dir->path(), FileMgr, CI.getPCHContainerReader(),
+            Dir->path(), FileMgr, CI.getModuleCache(),
+            CI.getPCHContainerReader(),
             /*FindModuleFileExtensions=*/false, Validator,
             /*ValidateDiagnosticOptions=*/false))
       MDC->addFile(Dir->path());
@@ -1023,9 +1025,9 @@ bool CompilerInstance::ExecuteAction(FrontendAction &Act) {
 
   // Validate/process some options.
   if (getHeaderSearchOpts().Verbose)
-    OS << "clang -cc1 version " CLANG_VERSION_STRING
-       << " based upon " << BACKEND_PACKAGE_STRING
-       << " default target " << llvm::sys::getDefaultTargetTriple() << "\n";
+    OS << "clang -cc1 version " CLANG_VERSION_STRING << " based upon LLVM "
+       << LLVM_VERSION_STRING << " default target "
+       << llvm::sys::getDefaultTargetTriple() << "\n";
 
   if (getCodeGenOpts().TimePasses)
     createFrontendTimer();
@@ -1287,7 +1289,7 @@ static Optional<FileEntryRef> getPublicModuleMap(FileEntryRef File,
   else if (Filename == "module.private.modulemap")
     llvm::sys::path::append(PublicFilename, "module.modulemap");
   else
-    return None;
+    return std::nullopt;
   return FileMgr.getOptionalFileRef(PublicFilename);
 }
 
@@ -2030,7 +2032,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
         Sub = loadModule(ImportLoc, PrivPath, Visibility, IsInclusionDirective);
       if (Sub) {
         MapPrivateSubModToTopLevel = true;
-        PP->markModuleAsAffecting(Module);
+        PP->markClangModuleAsAffecting(Module);
         if (!getDiagnostics().isIgnored(
                 diag::warn_no_priv_submodule_use_toplevel, ImportLoc)) {
           getDiagnostics().Report(Path[I].second,

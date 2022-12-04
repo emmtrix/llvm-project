@@ -115,6 +115,17 @@ Fortran::lower::CallerInterface::getPassArgIndex() const {
     }
     ++passArgIdx;
   }
+  if (!passArg)
+    return passArg;
+  // Take into account result inserted as arguments.
+  if (std::optional<Fortran::lower::CallInterface<
+          Fortran::lower::CallerInterface>::PassedEntity>
+          resultArg = getPassedResult()) {
+    if (resultArg->passBy == PassEntityBy::AddressAndLength)
+      passArg = *passArg + 2;
+    else if (resultArg->passBy == PassEntityBy::BaseAddress)
+      passArg = *passArg + 1;
+  }
   return passArg;
 }
 
@@ -251,7 +262,8 @@ void Fortran::lower::CallerInterface::walkResultLengths(
     if (std::optional<Fortran::evaluate::ExtentExpr> length =
             dynamicType.GetCharLength())
       visitor(toEvExpr(*length));
-  } else if (dynamicType.category() == common::TypeCategory::Derived) {
+  } else if (dynamicType.category() == common::TypeCategory::Derived &&
+             !dynamicType.IsUnlimitedPolymorphic()) {
     const Fortran::semantics::DerivedTypeSpec &derivedTypeSpec =
         dynamicType.GetDerivedTypeSpec();
     if (Fortran::semantics::CountLenParameters(derivedTypeSpec) > 0)
@@ -671,7 +683,7 @@ public:
             &result = procedure.functionResult)
       if (const auto *resultTypeAndShape = result->GetTypeAndShape())
         return resultTypeAndShape->type();
-    return llvm::None;
+    return std::nullopt;
   }
 
   static bool mustPassLengthWithDummyProcedure(
@@ -829,7 +841,7 @@ private:
     if (cat == Fortran::common::TypeCategory::Derived) {
       // TODO is kept under experimental flag until feature is complete.
       if (dynamicType.IsPolymorphic() &&
-          !getConverter().getLoweringOptions().isPolymorphicTypeImplEnabled())
+          !getConverter().getLoweringOptions().getPolymorphicTypeImpl())
         TODO(interface.converter.getCurrentLocation(),
              "support for polymorphic types");
 
@@ -921,15 +933,23 @@ private:
                                : PassEntityBy::BoxChar,
                    entity, characteristics);
     } else {
-      // Pass as fir.ref unless it's by VALUE and BIND(C)
+      // Pass as fir.ref unless it's by VALUE and BIND(C). Also pass-by-value
+      // for numerical/logical scalar without OPTIONAL so that the behavior is
+      // consistent with gfortran/nvfortran.
+      // TODO: pass-by-value for derived type is not supported yet
       mlir::Type passType = fir::ReferenceType::get(type);
       PassEntityBy passBy = PassEntityBy::BaseAddress;
       Property prop = Property::BaseAddress;
       if (isValueAttr) {
-        if (isBindC) {
+        bool isBuiltinCptrType = fir::isa_builtin_cptr_type(type);
+        if (isBindC || (!type.isa<fir::SequenceType>() &&
+                        !obj.attrs.test(Attrs::Optional) &&
+                        (dynamicType.category() !=
+                             Fortran::common::TypeCategory::Derived ||
+                         isBuiltinCptrType))) {
           passBy = PassEntityBy::Value;
           prop = Property::Value;
-          if (fir::isa_builtin_cptr_type(type)) {
+          if (isBuiltinCptrType) {
             auto recTy = type.dyn_cast<fir::RecordType>();
             mlir::Type fieldTy = recTy.getTypeList()[0].second;
             passType = fir::ReferenceType::get(fieldTy);
@@ -1040,15 +1060,15 @@ private:
           getConverter().getFoldingContext(), toEvExpr(*expr)));
     return std::nullopt;
   }
-  void
-  addFirOperand(mlir::Type type, int entityPosition, Property p,
-                llvm::ArrayRef<mlir::NamedAttribute> attributes = llvm::None) {
+  void addFirOperand(
+      mlir::Type type, int entityPosition, Property p,
+      llvm::ArrayRef<mlir::NamedAttribute> attributes = std::nullopt) {
     interface.inputs.emplace_back(
         FirPlaceHolder{type, entityPosition, p, attributes});
   }
   void
   addFirResult(mlir::Type type, int entityPosition, Property p,
-               llvm::ArrayRef<mlir::NamedAttribute> attributes = llvm::None) {
+               llvm::ArrayRef<mlir::NamedAttribute> attributes = std::nullopt) {
     interface.outputs.emplace_back(
         FirPlaceHolder{type, entityPosition, p, attributes});
   }
