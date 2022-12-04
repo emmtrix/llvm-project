@@ -272,13 +272,42 @@ TBAAAccessInfo CodeGenTBAA::getVTablePtrAccessInfo(llvm::Type *VTablePtrType) {
                         Size);
 }
 
+void CodeGenTBAA::AddCollectedField(
+    SmallVectorImpl<llvm::MDBuilder::TBAAStructField> &Fields, uint64_t Offset,
+    uint64_t Size, QualType QTy, bool MayAlias, bool FuseOverlapping) {
+
+  // Fuse fields that overlap in their byte position (e.g. caused by bitfields)
+  if (FuseOverlapping && !Fields.empty() && Fields.back().Offset <= Offset &&
+      Offset < Fields.back().Offset + Fields.back().Size) {
+    Fields.back().Size = (Offset + Size) - Fields.back().Offset;
+    return;
+  }
+
+  llvm::MDNode *TBAAType = MayAlias ? getChar() : getTypeInfo(QTy);
+  llvm::MDNode *TBAATag = getAccessTagInfo(TBAAAccessInfo(TBAAType, Size));
+  Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size, TBAATag));
+}
+
+// Calculate the number of bytes a bitfield affects.
+// E.g. a 6-bit field starting a bit 0 affects 1 byte,
+// a 6-bit field starting at bit 4 affects 2 bytes.
+static uint64_t getBitFieldByteSize(ASTContext& Context, uint64_t FieldBitOffset, const FieldDecl* Field) {
+  assert(Field->isBitField());
+
+  uint64_t LastBitOffset =
+      FieldBitOffset + Field->getBitWidthValue(Context) - 1;
+  uint64_t LastByteOffset = LastBitOffset / Context.getCharWidth();
+  uint64_t FirstByteOffset = FieldBitOffset / Context.getCharWidth();
+  return LastByteOffset - FirstByteOffset + 1;
+}
+
 bool
 CodeGenTBAA::CollectFields(uint64_t BaseOffset,
                            QualType QTy,
                            SmallVectorImpl<llvm::MDBuilder::TBAAStructField> &
                              Fields,
                            bool MayAlias) {
-  /* Things not handled yet include: C++ base classes, bitfields, */
+  /* Things not handled yet include: C++ base classes */
 
   if (const RecordType *TTy = QTy->getAs<RecordType>()) {
     const RecordDecl *RD = TTy->getDecl()->getDefinition();
@@ -300,19 +329,23 @@ CodeGenTBAA::CollectFields(uint64_t BaseOffset,
       uint64_t Offset = BaseOffset +
                         Layout.getFieldOffset(idx) / Context.getCharWidth();
       QualType FieldQTy = i->getType();
-      if (!CollectFields(Offset, FieldQTy, Fields,
-                         MayAlias || TypeHasMayAlias(FieldQTy)))
-        return false;
+      bool FieldMayAlias = MayAlias || TypeHasMayAlias(FieldQTy);
+      if ((*i)->isBitField()) {
+        uint64_t Size =
+            getBitFieldByteSize(Context, Layout.getFieldOffset(idx), *i);
+
+        AddCollectedField(Fields, Offset, Size, FieldQTy, FieldMayAlias, true);
+      } else {
+        if (!CollectFields(Offset, FieldQTy, Fields, FieldMayAlias))
+          return false;
+      }
     }
     return true;
   }
 
   /* Otherwise, treat whatever it is as a field. */
-  uint64_t Offset = BaseOffset;
   uint64_t Size = Context.getTypeSizeInChars(QTy).getQuantity();
-  llvm::MDNode *TBAAType = MayAlias ? getChar() : getTypeInfo(QTy);
-  llvm::MDNode *TBAATag = getAccessTagInfo(TBAAAccessInfo(TBAAType, Size));
-  Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size, TBAATag));
+  AddCollectedField(Fields, BaseOffset, Size, QTy, MayAlias, false);
   return true;
 }
 
@@ -382,7 +415,10 @@ llvm::MDNode *CodeGenTBAA::getBaseTypeInfoHelper(const Type *Ty) {
 
       uint64_t BitOffset = Layout.getFieldOffset(Field->getFieldIndex());
       uint64_t Offset = Context.toCharUnitsFromBits(BitOffset).getQuantity();
-      uint64_t Size = Context.getTypeSizeInChars(FieldQTy).getQuantity();
+      uint64_t Size = Field->isBitField()
+                          ? getBitFieldByteSize(Context, BitOffset, Field)
+                          : Context.getTypeSizeInChars(FieldQTy).getQuantity();
+
       Fields.push_back(llvm::MDBuilder::TBAAStructField(Offset, Size,
                                                         TypeNode));
     }

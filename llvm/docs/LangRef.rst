@@ -6406,6 +6406,11 @@ Note that the fields need not be contiguous. In this example, there is a
 4 byte gap between the two fields. This gap represents padding which
 does not carry useful data and need not be preserved.
 
+The order of the fields is unspecified. The byte range
+[offset, offset + size) of two fields must not overlap. The size
+of one field might be greater than the size of its TBAA tag (e.g. in
+case of arrays) or might be smaller (e.g. in case of bitfields).
+
 '``noalias``' and '``alias.scope``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -102,6 +102,32 @@ void copy7(A *a1, AA *a2) {
   *a1 = *a2;
 }
 
+struct E {
+  int : 8;
+  int a1 : 8;
+  int : 8;
+  int a2 : 8;
+  
+  int b1 : 9;
+  int : (32-9-9);
+  int b2 : 9;
+
+  int c1 : 15;
+  int c2 : 1;
+  int c3 : 1;
+  int : (32-15-1-1);
+  
+  char dummy[4];
+};
+
+void copy8(E *e1, E *e2) {
+// CHECK-LABEL: _Z5copy8P1ES0_
+// CHECK: call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 4 dereferenceable(16) %{{.*}}, ptr noundef nonnull align 4 dereferenceable(16) %{{.*}}, i64 16, i1 false)
+// CHECK-OLD-SAME: !tbaa.struct [[TS6:!.*]]
+// CHECK-NEW-SAME: !tbaa [[TAG_E:![0-9]*]]
+  *e1 = *e2;
+}
+
 // CHECK-OLD: [[TS]] = !{i64 0, i64 2, !{{.*}}, i64 4, i64 4, !{{.*}}, i64 8, i64 1, !{{.*}}, i64 12, i64 4, !{{.*}}}
 // CHECK-OLD: [[CHAR:!.*]] = !{!"omnipotent char", !{{.*}}}
 // CHECK-OLD: [[TAG_INT:!.*]] = !{[[INT:!.*]], [[INT]], i64 0}
@@ -113,6 +139,7 @@ void copy7(A *a1, AA *a2) {
 // CHECK-OLD: [[TS3]] = !{i64 0, i64 8, !{{.*}}, i64 0, i64 2, !{{.*}}, i64 4, i64 8, !{{.*}}}
 // CHECK-OLD: [[TS4]] = !{i64 0, i64 1, [[TAG_CHAR]], i64 1, i64 1, [[TAG_CHAR]], i64 2, i64 1, [[TAG_CHAR]]}
 // CHECK-OLD: [[TS5]] = !{i64 0, i64 1, [[TAG_CHAR]], i64 4, i64 1, [[TAG_CHAR]], i64 5, i64 1, [[TAG_CHAR]]}
+// CHECK-OLD: [[TS6]] = !{i64 1, i64 1, [[TAG_INT]], i64 3, i64 1, [[TAG_INT]], i64 4, i64 2, [[TAG_INT]], i64 6, i64 2, [[TAG_INT]], i64 8, i64 2, [[TAG_INT]], i64 10, i64 1, [[TAG_INT]], i64 12, i64 4, [[TAG_CHAR]]}
 
 // CHECK-NEW-DAG: [[TYPE_char:!.*]] = !{{{.*}}, i64 1, !"omnipotent char"}
 // CHECK-NEW-DAG: [[TAG_char]] = !{[[TYPE_char]], [[TYPE_char]], i64 0, i64 0}
@@ -127,3 +154,5 @@ void copy7(A *a1, AA *a2) {
 // CHECK-NEW-DAG: [[TAG_C]] = !{[[TYPE_C]], [[TYPE_C]], i64 0, i64 3}
 // CHECK-NEW-DAG: [[TYPE_D:!.*]] = !{[[TYPE_char]], i64 6, !"_ZTS1D", [[TYPE_char]], i64 0, i64 1, [[TYPE_char]], i64 4, i64 1, [[TYPE_char]], i64 5, i64 1}
 // CHECK-NEW-DAG: [[TAG_D]] = !{[[TYPE_D]], [[TYPE_D]], i64 0, i64 6}
+// CHECK-NEW-DAG: [[TYPE_E:!.*]] = !{[[TYPE_char]], i64 16, !"_ZTS1E", [[TYPE_int]], i64 1, i64 1, [[TYPE_int]], i64 3, i64 1, [[TYPE_int]], i64 4, i64 2, [[TYPE_int]], i64 6, i64 2, [[TYPE_int]], i64 8, i64 2, [[TYPE_int]], i64 9, i64 1, [[TYPE_int]], i64 10, i64 1, [[TYPE_char]], i64 12, i64 4}
+// CHECK-NEW-DAG: [[TAG_E]] = !{[[TYPE_E]], [[TYPE_E]], i64 0, i64 16}

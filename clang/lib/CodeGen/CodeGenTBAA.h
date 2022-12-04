@@ -146,6 +146,12 @@ class CodeGenTBAA {
   /// considered to be equivalent to it.
   llvm::MDNode *getChar();
 
+  /// AddCollectedField - Add one collected field to Fields vector
+  void
+  AddCollectedField(SmallVectorImpl<llvm::MDBuilder::TBAAStructField> &Fields,
+                    uint64_t Offset, uint64_t Size, QualType QTy, bool MayAlias,
+                    bool FuseOverlapping);
+
   /// CollectFields - Collect information about the fields of a type for
   /// !tbaa.struct metadata formation. Return false for an unsupported type.
   bool CollectFields(uint64_t BaseOffset,
