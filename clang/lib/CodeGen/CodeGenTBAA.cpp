@@ -291,7 +291,9 @@ void CodeGenTBAA::AddCollectedField(
 // Calculate the number of bytes a bitfield affects.
 // E.g. a 6-bit field starting a bit 0 affects 1 byte,
 // a 6-bit field starting at bit 4 affects 2 bytes.
-static uint64_t getBitFieldByteSize(ASTContext& Context, uint64_t FieldBitOffset, const FieldDecl* Field) {
+static uint64_t getBitFieldByteSize(ASTContext &Context,
+                                    uint64_t FieldBitOffset,
+                                    const FieldDecl *Field) {
   assert(Field->isBitField());
 
   uint64_t LastBitOffset =
