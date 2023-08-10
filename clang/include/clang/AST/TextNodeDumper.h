@@ -202,6 +202,8 @@ public:
   void dumpName(const NamedDecl *ND);
   void dumpAccessSpecifier(AccessSpecifier AS);
   void dumpCleanupObject(const ExprWithCleanups::CleanupObject &C);
+  void dumpNestedNameSpecifier(NestedNameSpecifier *NNS);
+  void dumpTemplateSpecializationKind(TemplateSpecializationKind TSK);
 
   void dumpDeclRef(const Decl *D, StringRef Label = {});
 
@@ -246,6 +248,7 @@ public:
   void VisitLabelStmt(const LabelStmt *Node);
   void VisitGotoStmt(const GotoStmt *Node);
   void VisitCaseStmt(const CaseStmt *Node);
+  void VisitReturnStmt(const ReturnStmt *Node);
   void VisitCompoundStmt(const CompoundStmt *Node);
   void VisitConstantExpr(const ConstantExpr *Node);
   void VisitCallExpr(const CallExpr *Node);
@@ -253,6 +256,7 @@ public:
   void VisitCastExpr(const CastExpr *Node);
   void VisitImplicitCastExpr(const ImplicitCastExpr *Node);
   void VisitDeclRefExpr(const DeclRefExpr *Node);
+  void VisitDependentScopeDeclRefExpr(const DependentScopeDeclRefExpr *Node);
   void VisitSYCLUniqueStableNameExpr(const SYCLUniqueStableNameExpr *Node);
   void VisitPredefinedExpr(const PredefinedExpr *Node);
   void VisitCharacterLiteral(const CharacterLiteral *Node);
@@ -301,8 +305,9 @@ public:
   void VisitOMPIteratorExpr(const OMPIteratorExpr *Node);
   void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *Node);
   void VisitRequiresExpr(const RequiresExpr *Node);
+  void VisitOpaqueValueExpr(const OpaqueValueExpr *Node);
 
-  void VisitRValueReferenceType(const ReferenceType *T);
+  void VisitReferenceType(const ReferenceType *T);
   void VisitArrayType(const ArrayType *T);
   void VisitConstantArrayType(const ConstantArrayType *T);
   void VisitVariableArrayType(const VariableArrayType *T);
@@ -327,6 +332,7 @@ public:
   void VisitInjectedClassNameType(const InjectedClassNameType *T);
   void VisitObjCInterfaceType(const ObjCInterfaceType *T);
   void VisitPackExpansionType(const PackExpansionType *T);
+  void VisitElaboratedType(const ElaboratedType *T);
 
   void VisitLabelDecl(const LabelDecl *D);
   void VisitTypedefDecl(const TypedefDecl *D);
@@ -337,6 +343,7 @@ public:
   void VisitFunctionDecl(const FunctionDecl *D);
   void VisitFieldDecl(const FieldDecl *D);
   void VisitVarDecl(const VarDecl *D);
+  void VisitParmVarDecl(const ParmVarDecl *D);
   void VisitBindingDecl(const BindingDecl *D);
   void VisitCapturedDecl(const CapturedDecl *D);
   void VisitImportDecl(const ImportDecl *D);
