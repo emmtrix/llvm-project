@@ -206,13 +206,13 @@ void TextNodeDumper::Visit(const Type *T) {
   OS << " ";
   dumpBareType(QualType(T, 0), false);
 
-  auto CT = T->getCanonicalTypeInternal();
-  if (CT.getTypePtr() != T) {
-    OS << " (canonical ";
-    OS << CT->getTypeClassName() << "Type";
-    dumpPointer(CT.getTypePtr());
-    OS << ")";
-  }
+  //auto CT = T->getCanonicalTypeInternal();
+  //if (CT.getTypePtr() != T) {
+  //  OS << " (canonical ";
+  //  OS << CT->getTypeClassName() << "Type";
+  //  dumpPointer(CT.getTypePtr());
+  //  OS << ")";
+  //}
 
   QualType SingleStepDesugar =
       T->getLocallyUnqualifiedSingleStepDesugaredType();
@@ -259,7 +259,7 @@ void TextNodeDumper::Visit(const Decl *D) {
     OS << D->getDeclKindName() << "Decl";
   }
   dumpPointer(D);
-  OS << " lc " << cast_or_null<Decl>(D->getLexicalDeclContext());
+  //OS << " lc " << cast_or_null<Decl>(D->getLexicalDeclContext());
   if (D->getLexicalDeclContext() != D->getDeclContext())
     OS << " parent " << cast<Decl>(D->getDeclContext());
   dumpPreviousDecl(OS, D);
@@ -1856,11 +1856,13 @@ void TextNodeDumper::VisitIndirectFieldDecl(const IndirectFieldDecl *D) {
 }
 
 void TextNodeDumper::VisitFunctionDecl(const FunctionDecl *D) {
+#if 0
   for (auto *D2 : D->decls())
     AddChild([=] {
       OS << "Decl: ";
       dumpBareDeclRef(D2);
     });
+#endif
 
   dumpName(D);
   dumpType(D->getType());
