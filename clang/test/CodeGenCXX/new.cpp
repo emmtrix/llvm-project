@@ -1,3 +1,4 @@
+// RUN: %clang_cc1 -std=c++14 -triple x86_64-unknown-unknown %s -emit-llvm -fno-builtin -o - | FileCheck %s -check-prefix CHECK-NOBUILTIN
 // RUN: %clang_cc1 -std=c++14 -triple x86_64-unknown-unknown %s -emit-llvm -o - | FileCheck %s
 
 typedef __typeof__(sizeof(0)) size_t;
@@ -200,11 +201,19 @@ void f() {
 namespace test15 {
   struct A { A(); ~A(); };
 
+
   // CHECK-LABEL:    define{{.*}} void @_ZN6test156test0aEPv(
   // CHECK:      [[P:%.*]] = load ptr, ptr
   // CHECK-NOT:  icmp eq ptr [[P]], null
   // CHECK-NOT:  br i1
   // CHECK-NEXT: call void @_ZN6test151AC1Ev(ptr {{[^,]*}} [[P]])
+
+  // CHECK-NOBUILTIN-LABEL:    define{{.*}} void @_ZN6test156test0aEPv(
+  // CHECK-NOBUILTIN:      [[P0:%.*]] = load ptr, ptr
+  // CHECK-NOBUILTIN:      [[P:%.*]] = call noundef ptr @_ZnwmPv(i64 noundef 1, ptr noundef [[P0]]
+  // CHECK-NOBUILTIN-NEXT: icmp eq ptr [[P]], null
+  // CHECK-NOBUILTIN-NEXT: br i1
+  // CHECK-NOBUILTIN: call void @_ZN6test151AC1Ev(ptr {{[^,]*}} [[P]])
   void test0a(void *p) {
     new (p) A();
   }
@@ -219,6 +228,7 @@ namespace test15 {
     new (p, true) A();
   }
 
+
   // CHECK-LABEL:    define{{.*}} void @_ZN6test156test1aEPv(
   // CHECK:      [[P:%.*]] = load ptr, ptr
   // CHECK-NOT:  icmp eq ptr [[P]], null
@@ -230,6 +240,20 @@ namespace test15 {
   // CHECK-NEXT: [[NEXT]] = getelementptr inbounds [[A]], ptr [[CUR]], i64 1
   // CHECK-NEXT: [[DONE:%.*]] = icmp eq ptr [[NEXT]], [[END]]
   // CHECK-NEXT: br i1 [[DONE]]
+
+  // CHECK-NOBUILTIN-LABEL:    define{{.*}} void @_ZN6test156test1aEPv(
+  // CHECK-NOBUILTIN:      [[P0:%.*]] = load ptr, ptr
+  // CHECK-NOBUILTIN:      [[P:%.*]] = call noundef ptr @_ZnamPv(i64 noundef 13, ptr noundef [[P0]]
+  // CHECK-NOBUILTIN-NEXT: icmp eq ptr [[P]], null
+  // CHECK-NOBUILTIN-NEXT: br i1
+  // CHECK-NOBUILTIN:      [[AFTER_COOKIE:%.*]] = getelementptr inbounds i8, ptr [[P]], i64 8
+  // CHECK-NOBUILTIN-NEXT: [[END:%.*]] = getelementptr inbounds [[A:.*]], ptr [[AFTER_COOKIE]], i64 5
+  // CHECK-NOBUILTIN-NEXT: br label
+  // CHECK-NOBUILTIN:      [[CUR:%.*]] = phi ptr [ [[AFTER_COOKIE]], {{%.*}} ], [ [[NEXT:%.*]], {{%.*}} ]
+  // CHECK-NOBUILTIN-NEXT: call void @_ZN6test151AC1Ev(ptr {{[^,]*}} [[CUR]])
+  // CHECK-NOBUILTIN-NEXT: [[NEXT]] = getelementptr inbounds [[A]], ptr [[CUR]], i64 1
+  // CHECK-NOBUILTIN-NEXT: [[DONE:%.*]] = icmp eq ptr [[NEXT]], [[END]]
+  // CHECK-NOBUILTIN-NEXT: br i1 [[DONE]]
   void test1a(void *p) {
     new (p) A[5];
   }
@@ -263,6 +287,19 @@ namespace test15 {
   // CHECK-NEXT: br label
   // CHECK:      [[CUR:%.*]] = phi ptr [ [[P]],
   // CHECK-NEXT: call void @_ZN6test151AC1Ev(ptr {{[^,]*}} [[CUR]])
+
+  // CHECK-NOBUILTIN-LABEL:    define{{.*}} void @_ZN6test155test2EPvi(
+  // CHECK-NOBUILTIN:      [[CONV:%.*]] = sext i32
+  // CHECK-NOBUILTIN:      [[N:%.*]] = select i1
+  // CHECK-NOBUILTIN-NEXT: [[P:%.*]] = load ptr, ptr
+  // CHECK-NOBUILTIN-NEXT: [[T0:%.*]] = call noundef ptr @_ZnamPv(i64 noundef [[N]], ptr noundef [[P]])
+  // CHECK-NOBUILTIN-NEXT: [[ISEMPTY:%.*]] = icmp eq ptr [[T0]], null
+  // CHECK-NOBUILTIN-NEXT: br i1 [[ISEMPTY]],
+  // CHECK-NOBUILTIN:      [[T1:%.*]] = getelementptr inbounds i8, ptr [[T0]], i64 8
+  // CHECK-NOBUILTIN:      [[END:%.*]] = getelementptr inbounds [[A]], ptr [[T1]], i64 [[CONV]]
+  // CHECK-NOBUILTIN-NEXT: br label
+  // CHECK-NOBUILTIN:      [[CUR:%.*]] = phi ptr [ [[T1]],
+  // CHECK-NOBUILTIN-NEXT: call void @_ZN6test151AC1Ev(ptr {{[^,]*}} [[CUR]])
   void test2(void *p, int n) {
     new (p) A[n];
   }

@@ -3296,6 +3296,9 @@ bool FunctionDecl::isReservedGlobalPlacementOperator() const {
     cast<TranslationUnitDecl>(getDeclContext()->getRedeclContext())
       ->getASTContext();
 
+  if (Context.getLangOpts().NoBuiltin)
+    return false;
+
   // The result type and first argument type are constant across all
   // these operators.  The second argument must be exactly void*.
   return (proto->getParamType(1).getCanonicalType() == Context.VoidPtrTy);
