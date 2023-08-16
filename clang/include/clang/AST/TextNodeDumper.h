@@ -202,8 +202,8 @@ public:
   void dumpName(const NamedDecl *ND);
   void dumpAccessSpecifier(AccessSpecifier AS);
   void dumpCleanupObject(const ExprWithCleanups::CleanupObject &C);
-  void dumpNestedNameSpecifier(NestedNameSpecifier *NNS);
   void dumpTemplateSpecializationKind(TemplateSpecializationKind TSK);
+  void dumpNestedNameSpecifier(const NestedNameSpecifier *NNS);
 
   void dumpDeclRef(const Decl *D, StringRef Label = {});
 

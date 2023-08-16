@@ -57,8 +57,8 @@ struct ConditionOpInterface
     return false;
   }
 
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
     return {};
   }
 
@@ -105,7 +105,7 @@ struct ExecuteRegionOpInterface
     : public BufferizableOpInterface::ExternalModel<ExecuteRegionOpInterface,
                                                     scf::ExecuteRegionOp> {
   AliasingOpOperandList
-  getAliasingOpOperands(Operation *op, OpResult opResult,
+  getAliasingOpOperands(Operation *op, Value value,
                         const AnalysisState &state) const {
     // ExecuteRegionOps do not have tensor OpOperands. The yielded value can be
     // any SSA value that is in scope. To allow for use-def chain traversal
@@ -113,7 +113,7 @@ struct ExecuteRegionOpInterface
     // is considered to be aliasing with the result.
     auto executeRegionOp = cast<scf::ExecuteRegionOp>(op);
     size_t resultNum = std::distance(op->getOpResults().begin(),
-                                     llvm::find(op->getOpResults(), opResult));
+                                     llvm::find(op->getOpResults(), value));
     // TODO: Support multiple blocks.
     assert(executeRegionOp.getRegion().getBlocks().size() == 1 &&
            "expected exactly 1 block");
@@ -160,7 +160,7 @@ struct ExecuteRegionOpInterface
 struct IfOpInterface
     : public BufferizableOpInterface::ExternalModel<IfOpInterface, scf::IfOp> {
   AliasingOpOperandList
-  getAliasingOpOperands(Operation *op, OpResult opResult,
+  getAliasingOpOperands(Operation *op, Value value,
                         const AnalysisState &state) const {
     // IfOps do not have tensor OpOperands. The yielded value can be any SSA
     // value that is in scope. To allow for use-def chain traversal through
@@ -168,7 +168,7 @@ struct IfOpInterface
     // branches are considered to be aliasing with the result.
     auto ifOp = cast<scf::IfOp>(op);
     size_t resultNum = std::distance(op->getOpResults().begin(),
-                                     llvm::find(op->getOpResults(), opResult));
+                                     llvm::find(op->getOpResults(), value));
     OpOperand *thenOperand = &ifOp.thenYield()->getOpOperand(resultNum);
     OpOperand *elseOperand = &ifOp.elseYield()->getOpOperand(resultNum);
     return {{thenOperand, BufferRelation::Equivalent, /*isDefinite=*/false},
@@ -426,8 +426,8 @@ struct ForOpInterface
     return true;
   }
 
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
     auto forOp = cast<scf::ForOp>(op);
     OpResult opResult = forOp.getResultForOpOperand(opOperand);
     BufferRelation relation = bufferRelation(op, opResult, state);
@@ -643,8 +643,8 @@ struct WhileOpInterface
     return true;
   }
 
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
     auto whileOp = cast<scf::WhileOp>(op);
     unsigned int idx = opOperand.getOperandNumber();
 
@@ -760,13 +760,6 @@ struct WhileOpInterface
                           const BufferizationOptions &options) const {
     auto whileOp = cast<scf::WhileOp>(op);
 
-    assert(whileOp.getBefore().getBlocks().size() == 1 &&
-           "regions with multiple blocks not supported");
-    Block *beforeBody = &whileOp.getBefore().front();
-    assert(whileOp.getAfter().getBlocks().size() == 1 &&
-           "regions with multiple blocks not supported");
-    Block *afterBody = &whileOp.getAfter().front();
-
     // Indices of all bbArgs that have tensor type. These are the ones that
     // are bufferized. The "before" and "after" regions may have different args.
     DenseSet<int64_t> indicesBefore = getTensorIndices(whileOp.getInits());
@@ -827,7 +820,7 @@ struct WhileOpInterface
     rewriter.setInsertionPointToStart(newBeforeBody);
     SmallVector<Value> newBeforeArgs = getBbArgReplacements(
         rewriter, newWhileOp.getBeforeArguments(), indicesBefore);
-    rewriter.mergeBlocks(beforeBody, newBeforeBody, newBeforeArgs);
+    rewriter.mergeBlocks(whileOp.getBeforeBody(), newBeforeBody, newBeforeArgs);
 
     // Set up new iter_args and move the loop body block to the new op.
     // The old block uses tensors, so wrap the (memref) bbArgs of the new block
@@ -835,7 +828,7 @@ struct WhileOpInterface
     rewriter.setInsertionPointToStart(newAfterBody);
     SmallVector<Value> newAfterArgs = getBbArgReplacements(
         rewriter, newWhileOp.getAfterArguments(), indicesAfter);
-    rewriter.mergeBlocks(afterBody, newAfterBody, newAfterArgs);
+    rewriter.mergeBlocks(whileOp.getAfterBody(), newAfterBody, newAfterArgs);
 
     // Replace loop results.
     replaceOpWithBufferizedValues(rewriter, op, newWhileOp->getResults());
@@ -945,8 +938,8 @@ struct YieldOpInterface
     return false;
   }
 
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
     if (auto ifOp = dyn_cast<scf::IfOp>(op->getParentOp())) {
       return {{op->getParentOp()->getResult(opOperand.getOperandNumber()),
                BufferRelation::Equivalent, /*isDefinite=*/false}};
@@ -1046,8 +1039,8 @@ struct ForallOpInterface
     return true;
   }
 
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
     auto forallOp = cast<ForallOp>(op);
     return {
         {{forallOp.getTiedOpResult(&opOperand), BufferRelation::Equivalent}}};

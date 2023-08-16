@@ -754,7 +754,27 @@ void TextNodeDumper::dumpCleanupObject(
     llvm_unreachable("unexpected cleanup type");
 }
 
-void clang::TextNodeDumper::dumpNestedNameSpecifier(NestedNameSpecifier *NNS) {
+void clang::TextNodeDumper::dumpTemplateSpecializationKind(
+    TemplateSpecializationKind TSK) {
+  switch (TSK) {
+  case TSK_Undeclared:
+    break;
+  case TSK_ImplicitInstantiation:
+    OS << " implicit_instantiation";
+    break;
+  case TSK_ExplicitSpecialization:
+    OS << " explicit_specialization";
+    break;
+  case TSK_ExplicitInstantiationDeclaration:
+    OS << " explicit_instantiation_declaration";
+    break;
+  case TSK_ExplicitInstantiationDefinition:
+    OS << " explicit_instantiation_definition";
+    break;
+  }
+}
+
+void clang::TextNodeDumper::dumpNestedNameSpecifier(const NestedNameSpecifier *NNS) {
   if (!NNS)
     return;
 
@@ -792,26 +812,6 @@ void clang::TextNodeDumper::dumpNestedNameSpecifier(NestedNameSpecifier *NNS) {
 
     dumpNestedNameSpecifier(NNS->getPrefix());
   });
-}
-
-void clang::TextNodeDumper::dumpTemplateSpecializationKind(
-    TemplateSpecializationKind TSK) {
-  switch (TSK) {
-  case TSK_Undeclared:
-    break;
-  case TSK_ImplicitInstantiation:
-    OS << " implicit_instantiation";
-    break;
-  case TSK_ExplicitSpecialization:
-    OS << " explicit_specialization";
-    break;
-  case TSK_ExplicitInstantiationDeclaration:
-    OS << " explicit_instantiation_declaration";
-    break;
-  case TSK_ExplicitInstantiationDefinition:
-    OS << " explicit_instantiation_definition";
-    break;
-  }
 }
 
 void TextNodeDumper::dumpDeclRef(const Decl *D, StringRef Label) {
@@ -2183,11 +2183,11 @@ void TextNodeDumper::VisitTypeAliasTemplateDecl(
 
 void TextNodeDumper::VisitCXXRecordDecl(const CXXRecordDecl *D) {
   VisitRecordDecl(D);
-  if (auto *Instance = D->getInstantiatedFromMemberClass()) {
+  if (const auto *Instance = D->getInstantiatedFromMemberClass()) {
     OS << " instantiated_from";
     dumpPointer(Instance);
   }
-  if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D))
+  if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D))
     dumpTemplateSpecializationKind(CTSD->getSpecializationKind());
 
   dumpNestedNameSpecifier(D->getQualifier());
@@ -2392,6 +2392,7 @@ void TextNodeDumper::VisitUsingDecl(const UsingDecl *D) {
   if (D->getQualifier())
     D->getQualifier()->print(OS, D->getASTContext().getPrintingPolicy());
   OS << D->getDeclName();
+  dumpNestedNameSpecifier(D->getQualifier());
 }
 
 void TextNodeDumper::VisitUsingEnumDecl(const UsingEnumDecl *D) {

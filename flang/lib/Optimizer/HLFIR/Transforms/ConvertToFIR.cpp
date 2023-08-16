@@ -138,7 +138,18 @@ public:
       } else {
         fir::runtime::genAssign(builder, loc, to, from);
       }
-    } else if (lhs.isArray()) {
+    } else if (lhs.isArray() ||
+               // Special case for element-by-element (or scalar) assignments
+               // generated for creating polymorphic expressions.
+               // The LHS of these assignments is a box describing just
+               // a single element, not the whole allocatable temp.
+               // They do not have 'realloc' attribute, because reallocation
+               // must not happen. The only expected effect of such an
+               // assignment is the copy of the contents, because the dynamic
+               // types of the LHS and the RHS must match already. We use the
+               // runtime in this case so that the polymorphic (including
+               // unlimited) content is copied properly.
+               (lhs.isPolymorphic() && assignOp.isTemporaryLHS())) {
       // Use the runtime for simplicity. An optimization pass will be added to
       // inline array assignment when profitable.
       mlir::Value from = emboxRHS(rhsExv);
@@ -312,12 +323,20 @@ public:
     if (auto attrs = declareOp.getFortranAttrs())
       fortranAttrs =
           fir::FortranVariableFlagsAttr::get(rewriter.getContext(), *attrs);
-    auto firBase = rewriter
-                       .create<fir::DeclareOp>(
-                           loc, memref.getType(), memref, declareOp.getShape(),
-                           declareOp.getTypeparams(), declareOp.getUniqName(),
-                           fortranAttrs)
-                       .getResult();
+    auto firDeclareOp = rewriter.create<fir::DeclareOp>(
+        loc, memref.getType(), memref, declareOp.getShape(),
+        declareOp.getTypeparams(), declareOp.getUniqName(), fortranAttrs);
+
+    // Propagate other attributes from hlfir.declare to fir.declare.
+    // OpenACC's acc.declare is one example. Right now, the propagation
+    // is verbatim.
+    mlir::NamedAttrList elidedAttrs =
+        mlir::NamedAttrList{firDeclareOp->getAttrs()};
+    for (const mlir::NamedAttribute &attr : declareOp->getAttrs())
+      if (!elidedAttrs.get(attr.getName()))
+        firDeclareOp->setAttr(attr.getName(), attr.getValue());
+
+    auto firBase = firDeclareOp.getResult();
     mlir::Value hlfirBase;
     mlir::Type hlfirBaseType = declareOp.getBase().getType();
     if (hlfirBaseType.isa<fir::BaseBoxType>()) {

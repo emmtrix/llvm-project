@@ -1276,6 +1276,8 @@ void func() {}
                 auto *result = clang_Cursor_Evaluate(child);
                 EXPECT_NE(result, nullptr);
                 EXPECT_EQ(clang_EvalResult_getAsInt(result), 42);
+                clang_EvalResult_dispose(result);
+
                 ++*pcount;
 
                 return CXChildVisit_Recurse;
