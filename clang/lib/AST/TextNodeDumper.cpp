@@ -1946,7 +1946,7 @@ void TextNodeDumper::VisitFunctionDecl(const FunctionDecl *D) {
   if (!D->param_empty() && !D->param_begin())
     OS << " <<<NULL params x " << D->getNumParams() << ">>>";
 
-  if (auto *Instance = D->getInstantiatedFromMemberFunction()) {
+  if (const auto *Instance = D->getInstantiatedFromMemberFunction()) {
     OS << " instantiated_from";
     dumpPointer(Instance);
   }
