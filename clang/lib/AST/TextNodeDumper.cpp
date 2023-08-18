@@ -1128,6 +1128,8 @@ void TextNodeDumper::VisitDeclRefExpr(const DeclRefExpr *Node) {
   case NOUR_Constant: OS << " non_odr_use_constant"; break;
   case NOUR_Discarded: OS << " non_odr_use_discarded"; break;
   }
+  if (Node->refersToEnclosingVariableOrCapture())
+    OS << " refers_to_enclosing_variable_or_capture";
   if (Node->isImmediateEscalating())
     OS << " immediate-escalating";
 }
@@ -1520,9 +1522,16 @@ void TextNodeDumper::VisitRequiresExpr(
     OS << (Node->isSatisfied() ? " satisfied" : " unsatisfied");
 }
 
-void TextNodeDumper::VisitRValueReferenceType(const ReferenceType *T) {
+void TextNodeDumper::VisitReferenceType(const ReferenceType *T) {
   if (T->isSpelledAsLValue())
-    OS << " written as lvalue reference";
+    OS << " spelled_as_lvalue";
+  if (T->isInnerRef())
+    OS << " inner_ref";
+}
+
+void TextNodeDumper::VisitOpaqueValueExpr(const OpaqueValueExpr* Node) {
+  if (Node->isUnique())
+    OS << " unique";
 }
 
 void TextNodeDumper::VisitArrayType(const ArrayType *T) {
@@ -1975,6 +1984,8 @@ void TextNodeDumper::VisitVarDecl(const VarDecl *D) {
     OS << " destroyed";
   if (D->isParameterPack())
     OS << " pack";
+  if (D->isInitCapture())
+    OS << " initcapture";
 
   if (D->hasInit()) {
     const Expr *E = D->getInit();

@@ -305,8 +305,9 @@ public:
   void VisitOMPIteratorExpr(const OMPIteratorExpr *Node);
   void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *Node);
   void VisitRequiresExpr(const RequiresExpr *Node);
+  void VisitOpaqueValueExpr(const OpaqueValueExpr *Node);
 
-  void VisitRValueReferenceType(const ReferenceType *T);
+  void VisitReferenceType(const ReferenceType *T);
   void VisitArrayType(const ArrayType *T);
   void VisitConstantArrayType(const ConstantArrayType *T);
   void VisitVariableArrayType(const VariableArrayType *T);
